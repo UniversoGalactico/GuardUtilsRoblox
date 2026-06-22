@@ -1,62 +1,47 @@
-# GuardUtils – Reusable Validation, Sanitization & Rate Limiting Module
-# Módulo Reutilizable de Validación, Sanitización y Rate Limiting
+# GuardUtils – Validation, Sanitization & Rate Limiting
 
-🌐 **English** | **Español**
-
----
-
-## 🇬🇧 English
-
-A free, dependency-free utility module for Roblox.  
-Provides validation, sanitization and rate limiting functions used by all modules in the Universo ecosystem.
-
-**What it offers:**
-- **isValidData** – Recursively validates values for DataStore safety.
-- **sanitizeNumber** – Rejects NaN, Infinity, and clamps to a safe range.
-- **sanitizeString** – Removes null bytes and limits length.
-- **jugadorValido** – Checks if a player is still active in the game.
-- **datosCargados** – Generic data load check (requires an external isLoaded function).
-- **isRateLimited** – Sliding-window rate limiter for any string key.
-- **deepCopy** – Cycle-safe deep copy of tables.
-- **isDataStoreSafe** – Checks if a value is safe to write to a DataStore.
-- **generarId** – Generates unique IDs for keys or logs.
-
-**How to use:**
-1. Place the `ModuleScript` in `ServerScriptService.ServerModules`.
-2. Require it: `local GuardUtils = require(script.Parent.GuardUtils)`
-3. Use any function directly: `GuardUtils.isValidData(value)`, `GuardUtils.isRateLimited("key")`.
-
-**Links:**
-- **Talent Hub:** [More advanced modules](https://create.roblox.com/talent/creators/5075515911)
-- **Discord:** universogalactico_28974 (UniversoGalactico)
+Dependency‑free utility for Roblox.
 
 ---
 
-## 🇪🇸 Español
+## API
 
-Un módulo de utilidades gratuito y sin dependencias para Roblox.  
-Provee funciones de validación, sanitización y rate limiting usadas por todos los módulos del ecosistema Universo.
+| Function | Description |
+| :--- | :--- |
+| `isValidData(value, maxKeys)` | Recursively validates DataStore‑safe values. |
+| `sanitizeNumber(value, min, max)` | Rejects NaN, Infinity; clamps to range. |
+| `sanitizeString(value, maxLength)` | Removes null bytes, trims, limits length. |
+| `jugadorValido(player)` | Checks if player is still valid. |
+| `datosCargados(player, isLoadedFunc)` | Generic data load check. |
+| `isRateLimited(key, maxRequestsPerSecond)` | Sliding‑window rate limiter. |
+| `deepCopy(original)` | Cycle‑safe deep copy. |
+| `isDataStoreSafe(value)` | Checks if value is safe for DataStore. |
+| `generarId(prefijo)` | Generates unique IDs. |
 
-**Qué ofrece:**
-- **isValidData** – Valida recursivamente valores para seguridad en DataStore.
-- **sanitizeNumber** – Rechaza NaN, infinitos y ajusta a un rango seguro.
-- **sanitizeString** – Elimina bytes nulos y limita la longitud.
-- **jugadorValido** – Verifica si un jugador sigue activo en el juego.
-- **datosCargados** – Comprobación genérica de carga de datos (requiere una función isLoaded externa).
-- **isRateLimited** – Limitador de frecuencia con ventana deslizante para claves string.
-- **deepCopy** – Copia profunda de tablas con protección anti‑ciclos.
-- **isDataStoreSafe** – Verifica si un valor es seguro para escribir en un DataStore.
-- **generarId** – Genera IDs únicos para claves o logs.
+### Mutex + Watchdog (Enterprise)
 
-**Cómo usarlo:**
-1. Coloca el `ModuleScript` en `ServerScriptService.ServerModules`.
-2. Requiérelo: `local GuardUtils = require(script.Parent.GuardUtils)`
-3. Usa cualquier función directamente: `GuardUtils.isValidData(value)`, `GuardUtils.isRateLimited("clave")`.
+```lua
+GuardUtils.registerMutexTable(mutexTable, timeout)
+GuardUtils.acquireMutex(mutexTable, key)
+GuardUtils.releaseMutex(mutexTable, key)
+Auto‑releases locks after timeout (configurable watchdog).
 
-**Enlaces:**
-- **Talent Hub:** [Módulos avanzados de pago](https://create.roblox.com/talent/creators/5075515911)
-- **Discord:** universogalactico_28974 (UniversoGalactico)
+Quick Example
+lua
+local GuardUtils = require(script.Parent.GuardUtils)
 
----
+-- Validate data before saving
+if GuardUtils.isValidData(data) then
+    DataStore:SetAsync(key, data)
+end
 
-*Made with ❤️ by Universogalactico64*
+-- Rate limit commands
+if GuardUtils.isRateLimited("cmd_" .. userId, 5) then
+    return -- too many requests
+end
+
+-- Mutex for critical section
+if GuardUtils.acquireMutex(mutex, userId) then
+    -- do work
+    GuardUtils.releaseMutex(mutex, userId)
+end
