@@ -14,6 +14,10 @@ local clock = 0
 local os = {clock = function() return clock end}
 local serial = 0
 local players = {}
+local typeof = function(value)
+    if type(value) == "table" and rawget(value, "_fakeInstance") then return "Instance" end
+    return type(value)
+end
 local http = {GenerateGUID = function() serial += 1; return "guid-" .. serial end}
 local game = {GetService = function(_, name)
     if name == "Players" then return players end
@@ -51,7 +55,17 @@ local function advanceScheduler(target)
     clock = target
 end
 local task = {
-    spawn = function(fn) resumeScheduled(coroutine.create(fn)) end,
+    spawn = function(fn)
+        local thread = coroutine.create(fn)
+        resumeScheduled(thread)
+        return thread
+    end,
+    cancel = function(thread)
+        for i = #scheduled, 1, -1 do
+            if scheduled[i].thread == thread then table.remove(scheduled, i) end
+        end
+        if coroutine.status(thread) == "suspended" then coroutine.close(thread) end
+    end,
     wait = function(duration) return coroutine.yield(duration) end,
 }
 local warn = function(...) end

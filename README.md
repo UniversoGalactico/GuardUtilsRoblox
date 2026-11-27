@@ -2,7 +2,7 @@
 
 Defensive Luau utilities for server-side validation, sanitization, rate limiting, lease ownership and graph copying.
 
-**3.0.0-rc.4 — review candidate; not a production certification.** MIT. No external runtime dependencies.
+**3.0.0-rc.5 — review candidate; not a production certification.** MIT. No external runtime dependencies.
 
 ## Install
 
@@ -43,7 +43,7 @@ end
 | sanitizeNumber(value, min?, max?, options?) | Number or nil, error; floors by default; Integer=false allows fractions; Clamp=true opts into clamping |
 | isRateLimited(key, limit?, window?) | True when limited or invalid; optional error code |
 | cleanupRateLimit(key), cleanupRateLimitPrefix(prefix) | Trusted-server reset |
-| registerMutexTable(locks, timeout?), unregisterMutexTable(idOrTable) | Register a plain mutable table as namespace; unregister refuses live leases |
+| registerMutexTable(locks, timeout?), unregisterMutexTable(idOrTable) | Register a table identity as namespace; unregister refuses live leases |
 | acquireMutex(locks, key, timeout?) | Opaque token or nil, error |
 | ownsMutex(locks, key, token) | True only for current unexpired owner |
 | renewMutex(locks, key, token, timeout?) | Boolean, optional error; cannot revive expired lease |
@@ -61,7 +61,7 @@ Validation defaults: 100 keys per table, 10,000 visited values, table depth 16, 
 
 Rate limit: fixed policy per key, exact sliding window, defaults 10 events/second. Maximum 1,000 events per window, 3,600 seconds per window, 10,000 keys and 100,000 accounted active timestamps. Expired prefixes of arrays are also bounded by compaction. Full capacity or policy mismatch fails closed. An empty idle key is collected after 120 seconds. Keys/policies/resets must be controlled by the server, never by arbitrary client input. Limits are per VM.
 
-Mutexes are expiring leases; expiry never cancels an old coroutine. Use a stable, plain mutable table as a namespace identity. Authoritative records are private and the module never reads or modifies the namespace contents. Up to 1,024 namespaces, 1,024 retained locks per namespace and 32,768 retained lock records globally; string keys are at most 200 bytes. Expired records are collected lazily or by maintenance. Unregistering a namespace with live leases fails. withMutex closes a yielded callback; previously completed side effects cannot be undone, and asynchronous side effects must not be spawned in critical sections. Stop() invalidates internal leases and clears rate limits without touching caller tables; Stop(false) pauses maintenance. Valid rate requests restart maintenance even if limited. Do not stop while owners are working.
+Mutexes are expiring leases; expiry never cancels an old coroutine. Use a stable table as a namespace identity; frozen tables and metatables are supported because table contents are never inspected. Authoritative records are private and the module never reads or modifies the namespace contents. Up to 1,024 namespaces, 1,024 retained locks per namespace and 32,768 retained lock records globally; string keys are at most 200 bytes. Expired records are collected lazily or by maintenance. Unregistering a namespace with live leases fails. withMutex closes a yielded callback; previously completed side effects cannot be undone, and asynchronous side effects must not be spawned in critical sections. Stop() invalidates internal leases and clears rate limits without touching caller tables; Stop(false) pauses maintenance and cancels its scheduled watchdog; repeated Start/Stop does not accumulate sleeping watchdogs. Valid rate and acquisition requests restart maintenance even if denied. Do not stop while owners are working.
 
 ## Migration notes
 

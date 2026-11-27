@@ -18,7 +18,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.4" }
+local GuardUtils = { VERSION = "3.0.0-rc.5" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
@@ -94,6 +94,7 @@ local mutexRegistrationIdsByTable: {[any]: string?} = setmetatable(
 
 local running = false
 local watchdogGeneration = 0
+local watchdogThread: thread? = nil
 local startWatchdog: (() -> boolean)? = nil
 
 -- ==========================================================================
@@ -341,6 +342,7 @@ function GuardUtils.datosCargados(player: any, isLoadedFunc: any)
 		return false, "CALLBACK_ERROR"
 	end
 
+	if not GuardUtils.jugadorValido(player) then return false, "INVALID_PLAYER" end
 	return result == true
 end
 
@@ -543,7 +545,7 @@ end
 
 -- The caller's table is an identity only. Authoritative records never escape this module.
 local function validateMutexTable(namespace: any): boolean
-	return type(namespace) == "table" and getmetatable(namespace) == nil and not table.isfrozen(namespace)
+	return type(namespace) == "table"
 end
 
 local function validateMutexTimeout(timeout: any): boolean
@@ -635,6 +637,7 @@ function GuardUtils.acquireMutex(namespace: any, key: any, timeout: any?)
 	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
 	if not isValidMutexKey(key) then return nil, "INVALID_KEY" end
 	if timeout ~= nil and not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
+	ensureStarted()
 	local registration = getRegistration(namespace)
 	if not registration then
 		local id, err = GuardUtils.registerMutexTable(namespace)
@@ -768,36 +771,23 @@ function GuardUtils.runMaintenance()
 end
 
 function GuardUtils.Start(): boolean
-	if running then
-		return true
-	end
-
+	if running then return true end
 	running = true
 	watchdogGeneration += 1
-
-	local generation =
-		watchdogGeneration
-
-	task.spawn(function()
-		while running
-			and watchdogGeneration
-			== generation do
-
-			task.wait(
-				CONFIG.WATCHDOG_INTERVAL
-			)
-
-			if not running
-				or watchdogGeneration
-				~= generation then
-
-				break
-			end
-
+	local generation = watchdogGeneration
+	local ok, handle = pcall(task.spawn, function()
+		while running and watchdogGeneration == generation do
+			task.wait(CONFIG.WATCHDOG_INTERVAL)
+			if not running or watchdogGeneration ~= generation then break end
 			GuardUtils.runMaintenance()
 		end
 	end)
-
+	if not ok then
+		running = false
+		warn("[GuardUtils] Watchdog start failed:", handle)
+		return false
+	end
+	watchdogThread = handle
 	return true
 end
 startWatchdog = GuardUtils.Start
@@ -805,9 +795,16 @@ startWatchdog = GuardUtils.Start
 -- clearState:
 --   nil / true -> limpia estado interno sin modificar las tablas del llamador.
 --   false      -> detiene el watchdog pero conserva el estado.
-function GuardUtils.Stop(clearState: boolean?)
+function GuardUtils.Stop(clearState: any?)
+	if clearState ~= nil and type(clearState) ~= "boolean" then return false, "INVALID_CLEAR_STATE" end
 	running = false
 	watchdogGeneration += 1
+	local handle = watchdogThread
+	watchdogThread = nil
+	if handle and coroutine.status(handle) ~= "dead" then
+		local ok, err = pcall(task.cancel, handle)
+		if not ok then warn("[GuardUtils] Watchdog cancellation failed:", err) end
+	end
 	if clearState == false then return true end
 	table.clear(rateLimitEntries)
 	rateLimitKeyCount = 0
@@ -885,29 +882,10 @@ function GuardUtils.deepCopy(original: any)
 end
 
 function GuardUtils.generarId(prefijo: any?): string
-	local prefix =
-		type(prefijo) == "string"
-		and prefijo
-		or "id"
-
-	prefix =
-		prefix:gsub(
-			"[^%w_%-]",
-			"_"
-		)
-
-	if prefix == "" then
-		prefix = "id"
-	end
-
-	if #prefix > 40 then
-		prefix =
-			prefix:sub(1, 40)
-	end
-
-	return prefix
-		.. "_"
-		.. HttpService:GenerateGUID(false)
+	local prefix = if type(prefijo) == "string" then prefijo:sub(1, 40) else "id"
+	prefix = prefix:gsub("[^%w_%-]", "_")
+	if prefix == "" then prefix = "id" end
+	return prefix .. "_" .. HttpService:GenerateGUID(false)
 end
 
 return GuardUtils
