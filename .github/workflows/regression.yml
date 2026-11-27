@@ -27,7 +27,11 @@ jobs:
           unzip -q "$archive" -d "$RUNNER_TEMP/luau"
           chmod +x "$RUNNER_TEMP/luau/luau" "$RUNNER_TEMP/luau/luau-analyze"
       - name: Regression and differential tests
-        run: python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau"
+        run: |
+          for opt in 0 1 2; do
+            python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau" --optimization "$opt"
+            python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau" --stateful --optimization "$opt"
+          done
       - name: Strict type analysis of production source
         run: python3 tests/typecheck.py --analyzer "$RUNNER_TEMP/luau/luau-analyze"
       - name: Comparative microbenchmarks (diagnostic)

@@ -208,8 +208,10 @@ test("mutex capacity accounting and recovery",function()
 	eq(Guard.GetStats().MutexRecords,32768)
 	eq(Guard.GetStats().ActiveMutexes,32768)
 	local overflow={}
+	local before=Guard.GetStats().MutexRegistrations
 	local token,code=Guard.acquireMutex(overflow,1,10)
 	eq(token,nil);eq(code,"MUTEX_RECORD_CAPACITY_REACHED")
+	eq(Guard.GetStats().MutexRegistrations,before)
 	clock=10;eq(Guard.runMaintenance(),true)
 	eq(Guard.GetStats().MutexRecords,0)
 	assert(Guard.acquireMutex(overflow,1,10))
@@ -368,4 +370,111 @@ test("bounded ID prefix processing",function()
 	eq(Guard.generarId(""):sub(1,3),"id_")
 	eq(Guard.generarId("a b"):sub(1,4),"a_b_")
 end)
+
+-- Minimized counterexamples from LuauProof 3.20 adversarial campaign.
+test("lease sub-ULP durations do not start expired",function()
+	clock=1000
+	local ns={}
+	local token=assert(Guard.acquireMutex(ns,"key",1e-15))
+	eq(Guard.ownsMutex(ns,"key",token),true)
+	eq(Guard.renewMutex(ns,"key",token,1e-15),true)
+	eq(Guard.ownsMutex(ns,"key",token),true)
+	clock=1000+2^-43
+	eq(Guard.ownsMutex(ns,"key",token),false)
+end)
+test("exact binary64 expiry comparison",function()
+	local ns={}
+	clock=string.unpack("<d",string.pack("<I4I4",1,0))
+	local token=assert(Guard.acquireMutex(ns,"key",1))
+	eq(Guard.isRateLimited("key",1,1),false)
+	clock=1 -- rounded subtraction is 1, but the exact elapsed time is < 1
+	eq(Guard.ownsMutex(ns,"key",token),true)
+	eq(Guard.isRateLimited("key",1,1),true)
+	clock=1+2^-52
+	eq(Guard.ownsMutex(ns,"key",token),false)
+	eq(Guard.isRateLimited("key",1,1),false)
+end)
+test("clock regression cannot revive leases or refill rate budget",function()
+	clock=10
+	local ns={};local token=assert(Guard.acquireMutex(ns,"key",1))
+	eq(Guard.isRateLimited("key",1,1),false)
+	clock=10.5;eq(Guard.isRateLimited("key",1,1),true)
+	clock=9;eq(Guard.isRateLimited("key",1,1),true)
+	clock=11;eq(Guard.ownsMutex(ns,"key",token),false)
+	clock=0;eq(Guard.ownsMutex(ns,"key",token),false)
+	clock=0/0;eq(Guard.ownsMutex(ns,"key",token),false)
+	clock=math.huge;eq(Guard.isRateLimited("key",1,1),false)
+	eq(Guard.isRateLimited("key",1,1),true)
+end)
+test("original malformed UTF8 is never repaired into accepted input",function()
+	for _,s in ipairs({"\194\000\162","\226\000\130\172","\240\159\127\146\169"}) do
+		local got,err=Guard.sanitizeString(s)
+		eq(got,nil);eq(err,"INVALID_UTF8")
+	end
+	eq(Guard.sanitizeString("  hola\000  "),"hola")
+end)
+test("raw numeric bounds checked before flooring",function()
+	local x,err=Guard.sanitizeNumber(10.9,0,10)
+	eq(x,nil);eq(err,"OUT_OF_RANGE")
+	eq(Guard.sanitizeNumber(10.9,0,10,{Clamp=true}),10)
+	eq(Guard.sanitizeNumber(10+2^-49,0,10),nil)
+	eq(Guard.sanitizeNumber(9.9,0,10),9)
+end)
+test("unknown options fail closed without invoking metamethods",function()
+	local valid,code=Guard.validateData({}, {MaxTotalNode=1})
+	eq(valid,false);eq(code,"UNKNOWN_VALIDATION_OPTION")
+	local got,err=Guard.sanitizeNumber(0.5,0,1,{Interger=false})
+	eq(got,nil);eq(err,"UNKNOWN_NUMBER_OPTION")
+	local fake=setmetatable({}, {__index=function() error("must not call") end,__iter=function() error("must not iterate") end})
+	eq(Guard.validateData({},fake),false);eq(Guard.sanitizeNumber(1,0,2,fake),nil)
+	local key=setmetatable({}, {__tostring=function() error("must not stringify") end})
+	eq(Guard.validateData({}, {[key]=true}),false)
+end)
+test("watchdog startup failures do not consume state or admit requests",function()
+	local original=task.spawn
+	for _,replacement in ipairs({function() error("injected") end,function() return nil end,function() local t=coroutine.create(function() end);coroutine.resume(t);return t end}) do
+		task.spawn=replacement
+		local limited,code=Guard.isRateLimited("x",1,1)
+		eq(limited,true);eq(code,"WATCHDOG_UNAVAILABLE")
+		local token,err=Guard.acquireMutex({},1)
+		eq(token,nil);eq(err,"WATCHDOG_UNAVAILABLE")
+		eq(Guard.GetStats().RateLimitKeys,0);eq(Guard.GetStats().MutexRegistrations,0)
+		eq(Guard.GetStats().Running,false)
+	end
+	task.spawn=original;eq(Guard.isRateLimited("x",1,1),false)
+	eq(Guard.GetStats().Running,true)
+end)
+test("dead watchdog recovered on next request",function()
+	assert(Guard.Start());eq(#scheduled,1)
+	task.cancel(scheduled[1].thread);eq(#scheduled,0)
+	eq(Guard.GetStats().Running,false)
+	eq(Guard.isRateLimited("x",1,1),false)
+	eq(Guard.GetStats().Running,true);eq(#scheduled,1)
+end)
+test("withMutex cancels scheduled yielded callback",function()
+	local ns={};local entered=false;local escaped=false
+	local oldWait=task.wait
+	task.wait=function(delay)
+		-- Simulate task.wait registering a callback thread independently of task.spawn.
+		table.insert(scheduled,{thread=coroutine.running(),wake=clock+delay})
+		return coroutine.yield(delay)
+	end
+	-- Start with the original wait to keep the watchdog scheduler stub consistent.
+	task.wait=oldWait;assert(Guard.Start())
+	local customWait=function(delay)
+		table.insert(scheduled,{thread=coroutine.running(),wake=clock+delay})
+		return coroutine.yield(delay)
+	end
+	local ok,code=Guard.withMutex(ns,1,function()
+		entered=true;customWait(0.5);escaped=true
+	end)
+	eq(entered,true);eq(ok,false);eq(code,"CALLBACK_YIELDED")
+	eq(Guard.isMutexLocked(ns,1),false);eq(#scheduled,1)
+	advanceScheduler(1);eq(escaped,false)
+end)
+test("published module API is immutable",function()
+	eq(table.isfrozen(Guard),true)
+	eq(pcall(function() Guard.Start=function() return true end end),false)
+end)
+
 print("PASS "..count.." suites")

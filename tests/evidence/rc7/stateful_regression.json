@@ -1,0 +1,47 @@
+{
+  "source_sha256": "b13b033acbe4e1858a57c39571d473703517dbc9e26a7bfa90ac3f9db560aeb5",
+  "runner_sha256": "d450246185dce0d936151ee81ec837fbbec692dcb0f20049df28fb84a09035cf",
+  "regression_sha256": "0db97920b0449ef36962980c9cb955a05e0dc325c030b772a19c5b35bf5354f0",
+  "stateful_sha256": "843d523b7472f8f51b0015e193c3caef59b216930342fb5c90c085017bec5f95",
+  "vm_sha256": "7741b96bd8fadb340965b7468dc4a2be8fe41247b8219bd8d4a7e80f16b40625",
+  "runs": [
+    {
+      "optimization": 0,
+      "suite": "regression",
+      "summary": "PASS 36 suites",
+      "elapsed_seconds": 1.2133810420000373
+    },
+    {
+      "optimization": 0,
+      "suite": "stateful",
+      "summary": "STATEFUL\t200000\t468692",
+      "elapsed_seconds": 1.0899546190003093
+    },
+    {
+      "optimization": 1,
+      "suite": "regression",
+      "summary": "PASS 36 suites",
+      "elapsed_seconds": 1.037593060999825
+    },
+    {
+      "optimization": 1,
+      "suite": "stateful",
+      "summary": "STATEFUL\t200000\t468692",
+      "elapsed_seconds": 1.0200337619999118
+    },
+    {
+      "optimization": 2,
+      "suite": "regression",
+      "summary": "PASS 36 suites",
+      "elapsed_seconds": 0.8499392839999018
+    },
+    {
+      "optimization": 2,
+      "suite": "stateful",
+      "summary": "STATEFUL\t200000\t468692",
+      "elapsed_seconds": 1.0663110369996502
+    }
+  ],
+  "status": "PASS",
+  "scope": "Actual source under bundled Luau CLI and deterministic service doubles; not Roblox Studio."
+}

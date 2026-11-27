@@ -1,0 +1,1213 @@
+{
+  "schema": 2,
+  "expected_counts_per_run": {
+    "numeric_oracle": 16384,
+    "validate_number": 16384,
+    "sanitize_number": 23088,
+    "lease_initial": 5536,
+    "rate_initial": 5536,
+    "lease_expiry": 5536,
+    "rate_expiry": 5536,
+    "lease_renew": 5536,
+    "lease_renew_initial": 5536,
+    "validate_utf8": 6007,
+    "sanitize_utf8": 6007
+  },
+  "scope": "Finite GuardUtils differential attack with original LuauProof 3.20 grammar, input generator, rational binary64 oracle, bundled VM and Roblox service doubles; not a formal proof or Studio test.",
+  "source_sha256": "05ceaa1b00fd5881eae5d303e8c078713fe5ae6e5e1256d754388313e9451693",
+  "runner_sha256": "fe3af370e381c679f07ce7f6db586ac0f7f29ebf4d8bc249fd94738c74e886bc",
+  "campaign_sha256": "3e6de828180ed463e4ca15d91433276e2deb8a661b7fcef1ccd8f062d2c10409",
+  "tool_pins": {
+    "numeric_fuzz320.py": "5d4cf91db579d2097cac2d13b9a77bef0bbad54878a47ad493a5d502d6f3e4b0",
+    "binary64_320.py": "8995a1949fcc910986bcfe38a9b9c406410db3c25929c45233f1a250a6fe8253",
+    "runtime/linux/luau": "7741b96bd8fadb340965b7468dc4a2be8fe41247b8219bd8d4a7e80f16b40625",
+    "runtime/linux/luau-compile": "c39103ed7650c1459b40d218d86c19b1ba2da5136fce52b5c2725fc61a46bc91"
+  },
+  "seed": 20261127,
+  "programs": 128,
+  "inputs": 128,
+  "numeric_expression_cases": 16384,
+  "direct_sanitize_cases": 6704,
+  "timing_cases": 5536,
+  "utf8_cases": 6007,
+  "generated_harness_sha256": "b9be282a0cbfeda2dc690508586e4089deaf6794fcf751ce8353967c88697f1d",
+  "runs": [
+    {
+      "optimization": 0,
+      "codegen": false,
+      "seconds": 0.3805297479998444,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "rate_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 5536,
+          "differences": 793
+        },
+        "lease_expiry": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "validate_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 6007,
+          "differences": 631
+        },
+        "lease_initial": {
+          "checks": 5536,
+          "differences": 1552
+        },
+        "lease_renew_initial": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "sanitize_number": {
+          "checks": 23088,
+          "differences": 200
+        }
+      },
+      "examples": [
+        [
+          "sanitize_number",
+          "9",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "29",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "53",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "77",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "101",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "105",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "125",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "166",
+          "reject",
+          "0"
+        ],
+        [
+          "lease_expiry",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "1",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "14",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "15",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_initial",
+          "16",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "17",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "26",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_initial",
+          "27",
+          "true",
+          "nil"
+        ],
+        [
+          "rate_expiry",
+          "30",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "32",
+          "true",
+          "nil"
+        ],
+        [
+          "rate_expiry",
+          "38",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "53",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "65",
+          "true",
+          "false"
+        ],
+        [
+          "sanitize_utf8",
+          "1",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "2",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "3",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "19",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "29",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "34",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "39",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "49",
+          "reject",
+          "accept"
+        ]
+      ],
+      "stderr": ""
+    },
+    {
+      "optimization": 1,
+      "codegen": false,
+      "seconds": 0.3431989999999132,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "rate_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 5536,
+          "differences": 793
+        },
+        "lease_expiry": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "validate_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 6007,
+          "differences": 631
+        },
+        "lease_initial": {
+          "checks": 5536,
+          "differences": 1552
+        },
+        "lease_renew_initial": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "sanitize_number": {
+          "checks": 23088,
+          "differences": 200
+        }
+      },
+      "examples": [
+        [
+          "sanitize_number",
+          "9",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "29",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "53",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "77",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "101",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "105",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "125",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "166",
+          "reject",
+          "0"
+        ],
+        [
+          "lease_expiry",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "1",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "14",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "15",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_initial",
+          "16",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "17",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "26",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_initial",
+          "27",
+          "true",
+          "nil"
+        ],
+        [
+          "rate_expiry",
+          "30",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "32",
+          "true",
+          "nil"
+        ],
+        [
+          "rate_expiry",
+          "38",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "53",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "65",
+          "true",
+          "false"
+        ],
+        [
+          "sanitize_utf8",
+          "1",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "2",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "3",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "19",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "29",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "34",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "39",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "49",
+          "reject",
+          "accept"
+        ]
+      ],
+      "stderr": ""
+    },
+    {
+      "optimization": 2,
+      "codegen": false,
+      "seconds": 0.4119452760000968,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "rate_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 5536,
+          "differences": 793
+        },
+        "lease_expiry": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "validate_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 6007,
+          "differences": 631
+        },
+        "lease_initial": {
+          "checks": 5536,
+          "differences": 1552
+        },
+        "lease_renew_initial": {
+          "checks": 5536,
+          "differences": 1620
+        },
+        "sanitize_number": {
+          "checks": 23088,
+          "differences": 200
+        }
+      },
+      "examples": [
+        [
+          "sanitize_number",
+          "9",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "29",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "53",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "77",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "101",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "105",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "125",
+          "reject",
+          "0"
+        ],
+        [
+          "sanitize_number",
+          "166",
+          "reject",
+          "0"
+        ],
+        [
+          "lease_expiry",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "0",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "1",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "1",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "4",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "8",
+          "true",
+          "false"
+        ],
+        [
+          "lease_expiry",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "12",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "14",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "14",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "15",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_initial",
+          "16",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "16",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "17",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_expiry",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_renew_initial",
+          "24",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "26",
+          "true",
+          "nil"
+        ],
+        [
+          "lease_initial",
+          "27",
+          "true",
+          "nil"
+        ],
+        [
+          "rate_expiry",
+          "30",
+          "true",
+          "false"
+        ],
+        [
+          "lease_initial",
+          "32",
+          "true",
+          "nil"
+        ],
+        [
+          "rate_expiry",
+          "38",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "53",
+          "true",
+          "false"
+        ],
+        [
+          "rate_expiry",
+          "65",
+          "true",
+          "false"
+        ],
+        [
+          "sanitize_utf8",
+          "1",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "2",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "3",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "19",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "29",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "34",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "39",
+          "reject",
+          "accept"
+        ],
+        [
+          "sanitize_utf8",
+          "49",
+          "reject",
+          "accept"
+        ]
+      ],
+      "stderr": ""
+    }
+  ],
+  "elapsed_seconds": 2.240937783999925,
+  "checks": 303258,
+  "differences": 24108,
+  "status": "DIFFERENCE_OBSERVED"
+}
