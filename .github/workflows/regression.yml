@@ -41,3 +41,26 @@ jobs:
           python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau" --benchmark --source "$RUNNER_TEMP/guardutils-baseline.lua"
           echo "CURRENT"
           python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau" --benchmark
+
+  publish-v3:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: luau
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Publish v3.0.0 once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! grep -Fq 'VERSION = "3.0.0"' GuardUtilsRoblox.lua; then exit 0; fi
+          if gh release view v3.0.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release already exists; leaving it unchanged."
+            exit 0
+          fi
+          gh release create v3.0.0 GuardUtilsRoblox.lua tests/studio_smoke.server.lua --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "GuardUtils 3.0.0" --notes-file docs/RELEASE_3.0.0.md --latest
