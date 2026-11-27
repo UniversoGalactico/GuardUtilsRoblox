@@ -20,7 +20,40 @@ local game = {GetService = function(_, name)
     if name == "HttpService" then return http end
     error("unexpected service " .. name)
 end}
-local task = {spawn = function(_) end, wait = function() error("unexpected wait") end}
+-- Deterministic cooperative watchdog scheduler. Not Roblox's real task scheduler.
+local scheduled = {}
+local function resumeScheduled(thread)
+    local ok, delay = coroutine.resume(thread)
+    assert(ok, delay)
+    if coroutine.status(thread) == "suspended" then
+        assert(type(delay) == "number" and delay > 0, "invalid simulated wait")
+        table.insert(scheduled, {thread = thread, wake = clock + delay})
+    end
+end
+local function resetScheduler()
+    for _, job in ipairs(scheduled) do
+        if coroutine.status(job.thread) == "suspended" then coroutine.close(job.thread) end
+    end
+    table.clear(scheduled)
+end
+local function advanceScheduler(target)
+    assert(target >= clock)
+    while true do
+        local best
+        for i, job in ipairs(scheduled) do
+            if job.wake <= target and (not best or job.wake < scheduled[best].wake) then best = i end
+        end
+        if not best then break end
+        local job = table.remove(scheduled, best)
+        clock = math.max(clock, job.wake)
+        resumeScheduled(job.thread)
+    end
+    clock = target
+end
+local task = {
+    spawn = function(fn) resumeScheduled(coroutine.create(fn)) end,
+    wait = function(duration) return coroutine.yield(duration) end,
+}
 local warn = function(...) end
 local Guard = (function()
 '''

@@ -69,7 +69,7 @@ The previous README omitted required owner tokens. Always pass them to releaseMu
 
 ## Tests
 
-Run `python3 tests/run.py --luau /path/to/luau`. The harness runs actual module source with a deterministic clock and minimal Roblox service doubles. It does not certify Studio or distributed behavior.
+Run `python3 tests/run.py --luau /path/to/luau`. The harness runs actual module source with a deterministic clock, cooperative watchdog scheduler and minimal Roblox service doubles. The regression suite includes independent breadth-first validation decisions, sliding-window and lease models, graph-copy identity checks, scheduler-generation tests and global capacity boundaries. It does not certify Studio's real scheduler, network services or distributed behavior.
 
 ## Español
 

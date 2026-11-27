@@ -3,7 +3,7 @@ local function eq(a,b,label)
 end
 local count=0
 local function test(name,fn)
-	Guard.Stop(); clock=0; fn(); count+=1; print("PASS "..name)
+	Guard.Stop(); resetScheduler(); clock=0; fn(); count+=1; print("PASS "..name)
 end
 test("primitive, cycles, invalid options",function()
 	eq(Guard.validateData({a=true,b="text"}),true)
@@ -226,5 +226,125 @@ test("callback cannot falsely report retained ownership after Stop",function()
 	end)
 	eq(ok,false);eq(code,"LOCK_OWNERSHIP_LOST")
 	eq(Guard.isMutexLocked(locks,1),true)
+end)
+test("automatic watchdog cleanup and generations",function()
+	local locks={}
+	assert(Guard.acquireMutex(locks,1,2))
+	eq(Guard.isRateLimited("idle",1,1),false)
+	eq(#scheduled,1)
+	for _=1,100 do Guard.Stop(false);Guard.Start() end
+	eq(#scheduled,101)
+	advanceScheduler(1)
+	eq(#scheduled,1)
+	advanceScheduler(2)
+	eq(Guard.GetStats().MutexRecords,0)
+	advanceScheduler(121)
+	eq(Guard.GetStats().RateLimitKeys,0)
+	Guard.Stop();advanceScheduler(122)
+	eq(#scheduled,0);eq(Guard.GetStats().Running,false)
+end)
+test("rate key cardinality and cleanup",function()
+	for i=1,10000 do eq(Guard.isRateLimited("key"..i,1,1),false) end
+	local limited,code=Guard.isRateLimited("overflow",1,1)
+	eq(limited,true);eq(code,"RATE_LIMIT_CAPACITY_REACHED")
+	Guard.cleanupRateLimitPrefix("key")
+	eq(Guard.GetStats().RateLimitKeys,0)
+	eq(Guard.GetStats().RateLimitTimestamps,0)
+	eq(Guard.isRateLimited("overflow",1,1),false)
+end)
+
+-- Independent breadth-first occurrence oracle. Generated strings are ASCII,
+-- so byte count equals codepoint count. Compare decisions, not error ordering.
+local function referenceAccept(root,opt,strict)
+	local queue={{v=root,depth=1,ancestors={}}}
+	local head,nodes,bytes=1,0,0
+	while head<=#queue do
+		local item=queue[head];head+=1;nodes+=1
+		if nodes>opt.MaxTotalNodes then return false end
+		local v=item.v
+		local kind=type(v)
+		if kind=="number" then
+			if v~=v or math.abs(v)>2^50 then return false end
+		elseif kind=="string" then
+			bytes+=#v
+			if #v>opt.MaxStringLength or v:find("\0",1,true) then return false end
+		elseif kind=="table" then
+			if item.depth>opt.MaxDepth or item.ancestors[v] then return false end
+			local ancestors=table.clone(item.ancestors);ancestors[v]=true
+			local keys,numeric,strings,maxIndex=0,0,0,0
+			for k,child in next,v do
+				keys+=1
+				if keys>opt.MaxKeysPerTable then return false end
+				if type(k)=="number" then
+					if k<1 or k%1~=0 or k>2^50 then return false end
+					numeric+=1;maxIndex=math.max(maxIndex,k)
+				elseif type(k)=="string" then
+					strings+=1;bytes+=#k
+					if #k>opt.MaxStringLength or k:find("\0",1,true) then return false end
+				else return false end
+				table.insert(queue,{v=child,depth=item.depth+1,ancestors=ancestors})
+			end
+			if strict and ((numeric>0 and strings>0) or maxIndex~=numeric) then return false end
+		elseif kind~="boolean" then return false end
+		if bytes>opt.MaxTotalBytes then return false end
+	end
+	return true
+end
+
+test("validation differential: 10000 graphs, 20000 decisions",function()
+	local seed=23497
+	local function rand(n) seed=(seed*16807)%2147483647;return seed%n+1 end
+	for i=1,10000 do
+		local graph={}
+		for j=1,rand(10) do graph[j]={} end
+		for j=1,#graph do
+			local node=graph[j]
+			for k=1,rand(5)-1 do
+				local keyChoice=rand(4)
+				local key=if keyChoice==1 then k elseif keyChoice==2 then k*2 elseif keyChoice==3 then "k"..k else -k
+				local kind=rand(6)
+				local value=if kind==1 then graph[rand(#graph)] elseif kind==2 then rand(30) elseif kind==3 then string.rep("a",rand(9)) elseif kind==4 then true elseif kind==5 then math.huge else "x\0"
+				node[key]=value
+			end
+		end
+		local options={MaxDepth=rand(8),MaxTotalNodes=rand(40),MaxTotalBytes=rand(100),MaxKeysPerTable=rand(6),MaxStringLength=rand(12)}
+		eq(Guard.validateData(graph[1],options),referenceAccept(graph[1],options,false),"generic graph "..i)
+		eq(Guard.isDataStoreSafe(graph[1],options),referenceAccept(graph[1],options,true),"strict graph "..i)
+	end
+end)
+test("graph copy differential: 1000 cyclic keyed graphs",function()
+	local seed=13813
+	local function rand(n) seed=(seed*16807)%2147483647;return seed%n+1 end
+	for _=1,1000 do
+		local nodes,index={},{}
+		for i=1,12 do nodes[i]={};index[nodes[i]]=i end
+		for i=1,#nodes do
+			for j=1,5 do
+				local k=if rand(2)==1 then nodes[rand(#nodes)] else "k"..j
+				local v=if rand(2)==1 then nodes[rand(#nodes)] else rand(100)
+				nodes[i][k]=v
+			end
+		end
+		local copy=assert(Guard.deepCopy(nodes))
+		local seen={}
+		for i=1,#nodes do
+			eq(index[copy[i]],nil);eq(seen[copy[i]],nil);seen[copy[i]]=true
+			local size=0;for _ in next,copy[i] do size+=1 end
+			local expected=0
+			for k,v in next,nodes[i] do
+				expected+=1
+				local mappedKey=if type(k)=="table" then copy[index[k]] else k
+				local mappedValue=if type(v)=="table" then copy[index[v]] else v
+				eq(copy[i][mappedKey],mappedValue)
+			end
+			eq(size,expected)
+		end
+	end
+end)
+test("copy refuses excessive graph budget",function()
+	local root={}
+	for i=1,100001 do root[i]=i end
+	local copy,code=Guard.deepCopy(root)
+	eq(copy,nil);eq(code,"COPY_EDGE_LIMIT")
 end)
 print("PASS "..count.." suites")
