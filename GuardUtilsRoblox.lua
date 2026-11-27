@@ -18,7 +18,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.8" }
+local GuardUtils = { VERSION = "3.0.0" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
