@@ -17,7 +17,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.1" }
+local GuardUtils = { VERSION = "3.0.0-rc.2" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
@@ -46,17 +46,19 @@ local CONFIG = table.freeze({
 	DEFAULT_MUTEX_TIMEOUT = 30,
 	MAX_MUTEX_TIMEOUT = 3600,
 	MAX_MUTEX_REGISTRATIONS = 1024,
+	MAX_MUTEX_KEYS_PER_REGISTRATION = 1024,
+	MAX_MUTEX_RECORDS = 32768,
+	MAX_MUTEX_KEY_BYTES = 200,
 })
 
 local rateLimitEntries = {}
 local rateLimitKeyCount = 0
 local rateLimitTimestampCount = 0
 
--- [registrationId] = {
---     MutexRef = weakValueReference,
---     Timeout = number,
--- }
+-- [registrationId] = { MutexRef = weakValueReference, Timeout = number, Locks = privateMap, Count = number }
 local mutexRegistrations = {}
+local mutexRegistrationCount = 0
+local mutexRecordCount = 0
 
 -- Evita registrar dos veces la misma tabla.
 -- Las claves son débiles para no impedir recolección.
@@ -91,7 +93,7 @@ local function isValidMutexKey(key)
 	local keyType = type(key)
 
 	if keyType == "string" then
-		return key ~= ""
+		return key ~= "" and #key <= CONFIG.MAX_MUTEX_KEY_BYTES
 	end
 
 	if keyType == "number" then
@@ -648,6 +650,7 @@ function GuardUtils.isRateLimited(key, limit, window)
 	if limit == nil then limit = CONFIG.MAX_REQUESTS_PER_WINDOW end
 	if window == nil then window = CONFIG.DEFAULT_RATE_LIMIT_WINDOW end
 	if not validateRateLimitConfig(limit, window) then return true, "INVALID_RATE_LIMIT_CONFIG" end
+	ensureStarted()
 	local now = os.clock()
 	local entry = rateLimitEntries[key]
 	if entry then
@@ -666,7 +669,6 @@ function GuardUtils.isRateLimited(key, limit, window)
 	end
 	table.insert(entry.Timestamps, now)
 	rateLimitTimestampCount += 1
-	ensureStarted()
 	return false
 end
 function GuardUtils.cleanupRateLimit(key)
@@ -686,372 +688,184 @@ end
 -- MUTEX CON TOKEN DE PROPIETARIO
 -- ==========================================================================
 
-local function validateMutexTable(mutexTable)
-	return type(mutexTable) == "table"
-		and getmetatable(mutexTable) == nil
-		and not table.isfrozen(mutexTable)
+-- The caller's table is an identity only. Authoritative records never escape this module.
+local function validateMutexTable(namespace)
+	return type(namespace) == "table" and getmetatable(namespace) == nil and not table.isfrozen(namespace)
 end
 
 local function validateMutexTimeout(timeout)
-	return isFiniteNumber(timeout)
-		and timeout > 0
-		and timeout <= CONFIG.MAX_MUTEX_TIMEOUT
+	return isFiniteNumber(timeout) and timeout > 0 and timeout <= CONFIG.MAX_MUTEX_TIMEOUT
 end
 
-local function isValidLockRecord(lock)
-	return type(lock) == "table"
-		and getmetatable(lock) == nil
-		and type(lock.Token) == "string"
-		and lock.Token ~= ""
-		and isFiniteNumber(lock.LockedAt)
-		and isFiniteNumber(lock.ExpiresAt)
-		and lock.ExpiresAt >= lock.LockedAt
+local function getRegistration(namespace)
+	local id = mutexRegistrationIdsByTable[namespace]
+	local registration = id and mutexRegistrations[id]
+	if id and not registration then mutexRegistrationIdsByTable[namespace] = nil end
+	return registration, id
 end
 
-local function getRegisteredTimeout(
-	mutexTable
-)
-	local registrationId =
-		mutexRegistrationIdsByTable[mutexTable]
-
-	if not registrationId then
-		return nil
+local function dropLock(registration, key)
+	if registration.Locks[key] then
+		registration.Locks[key] = nil
+		registration.Count -= 1
+		mutexRecordCount -= 1
 	end
-
-	local registration =
-		mutexRegistrations[registrationId]
-
-	if not registration then
-		mutexRegistrationIdsByTable[mutexTable] = nil
-
-		return nil
-	end
-
-	return registration.Timeout
 end
 
-local function resolveMutexTimeout(
-	mutexTable,
-	timeoutOverride
-)
-	if timeoutOverride ~= nil then
-		if not validateMutexTimeout(
-			timeoutOverride
-			) then
-
-			return nil,
-				"INVALID_TIMEOUT"
-		end
-
-		return timeoutOverride
+local function pruneExpired(registration, now)
+	for key, lock in pairs(registration.Locks) do
+		if now >= lock.ExpiresAt then dropLock(registration, key) end
 	end
-
-	return getRegisteredTimeout(mutexTable)
-		or CONFIG.DEFAULT_MUTEX_TIMEOUT
 end
 
-function GuardUtils.registerMutexTable(
-	mutexTable,
-	timeout
-)
-	if not validateMutexTable(mutexTable) then return nil, "INVALID_MUTEX_TABLE" end
-	local resolvedTimeout = timeout
-	if resolvedTimeout == nil then resolvedTimeout = CONFIG.DEFAULT_MUTEX_TIMEOUT end
-
-	if not validateMutexTimeout(
-		resolvedTimeout
-		) then
-
-		return nil, "INVALID_TIMEOUT"
+local function dropRegistration(id, registration)
+	local namespace = registration.MutexRef.Value
+	if namespace and mutexRegistrationIdsByTable[namespace] == id then
+		mutexRegistrationIdsByTable[namespace] = nil
 	end
-
-	local existingId =
-		mutexRegistrationIdsByTable[mutexTable]
-
-	if existingId
-		and mutexRegistrations[existingId] then
-
-		mutexRegistrations[existingId].Timeout = resolvedTimeout
-
-		return existingId
-	end
-
-	local count = 0
-	for id, registration in pairs(mutexRegistrations) do
-		if registration.MutexRef.Value == nil then mutexRegistrations[id] = nil else count += 1 end
-	end
-	if count >= CONFIG.MAX_MUTEX_REGISTRATIONS then return nil, "MUTEX_REGISTRATION_CAPACITY_REACHED" end
-	local registrationId = HttpService:GenerateGUID(false)
-
-	mutexRegistrations[registrationId] = {
-		MutexRef =
-			createWeakValueReference(
-				mutexTable
-			),
-
-		Timeout = resolvedTimeout,
-	}
-
-	mutexRegistrationIdsByTable[mutexTable] = registrationId
-	ensureStarted()
-	return registrationId
+	mutexRecordCount -= registration.Count
+	mutexRegistrationCount -= 1
+	mutexRegistrations[id] = nil
 end
 
--- identifier puede ser:
---   - registrationId;
---   - la propia tabla mutex.
-function GuardUtils.unregisterMutexTable(
-	identifier
-)
-	local registrationId
-
-	if type(identifier) == "string" then
-		registrationId = identifier
-	elseif type(identifier) == "table" then
-		registrationId =
-			mutexRegistrationIdsByTable[identifier]
-	else
-		return false,
-			"INVALID_IDENTIFIER"
-	end
-
-	if not registrationId then
-		return false, "NOT_REGISTERED"
-	end
-
-	local registration =
-		mutexRegistrations[registrationId]
-
-	if not registration then return false, "NOT_REGISTERED" end
+function GuardUtils.registerMutexTable(namespace, timeout)
+	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
+	if timeout == nil then timeout = CONFIG.DEFAULT_MUTEX_TIMEOUT end
+	if not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
+	local registration, id = getRegistration(namespace)
 	if registration then
-		local mutexTable =
-			registration.MutexRef.Value
-
-		if mutexTable then
-			mutexRegistrationIdsByTable[mutexTable] = nil
+		registration.Timeout = timeout
+		ensureStarted()
+		return id
+	end
+	if mutexRegistrationCount >= CONFIG.MAX_MUTEX_REGISTRATIONS then
+		for oldId, old in pairs(mutexRegistrations) do
+			if old.MutexRef.Value == nil then dropRegistration(oldId, old) end
+		end
+		if mutexRegistrationCount >= CONFIG.MAX_MUTEX_REGISTRATIONS then
+			return nil, "MUTEX_REGISTRATION_CAPACITY_REACHED"
 		end
 	end
+	id = HttpService:GenerateGUID(false)
+	mutexRegistrations[id] = {
+		MutexRef = createWeakValueReference(namespace),
+		Timeout = timeout,
+		Locks = {},
+		Count = 0,
+	}
+	mutexRegistrationIdsByTable[namespace] = id
+	mutexRegistrationCount += 1
+	ensureStarted()
+	return id
+end
 
-	mutexRegistrations[registrationId] = nil
-
+function GuardUtils.unregisterMutexTable(identifier)
+	local id
+	if type(identifier) == "string" then
+		id = identifier
+	elseif type(identifier) == "table" then
+		id = mutexRegistrationIdsByTable[identifier]
+	else
+		return false, "INVALID_IDENTIFIER"
+	end
+	local registration = id and mutexRegistrations[id]
+	if not registration then return false, "NOT_REGISTERED" end
+	pruneExpired(registration, os.clock())
+	if registration.Count > 0 then return false, "ACTIVE_LEASES" end
+	dropRegistration(id, registration)
 	return true
 end
 
--- Retorna:
---   token
--- o:
---   nil, errorCode
-function GuardUtils.acquireMutex(
-	mutexTable,
-	key,
-	timeout
-)
-	if not validateMutexTable(mutexTable) then return nil, "INVALID_MUTEX_TABLE" end
+-- A timeout override belongs only to this acquisition/renewal, never to the namespace policy.
+function GuardUtils.acquireMutex(namespace, key, timeout)
+	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
+	if not isValidMutexKey(key) then return nil, "INVALID_KEY" end
 	if timeout ~= nil and not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
-	if not isValidMutexKey(key) then
-		return nil, "INVALID_KEY"
+	local registration = getRegistration(namespace)
+	if not registration then
+		local id, err = GuardUtils.registerMutexTable(namespace)
+		if not id then return nil, err end
+		registration = mutexRegistrations[id]
 	end
-
-	-- Toda tabla usada por acquireMutex queda registrada
-	-- automáticamente. Así el watchdog no depende de que el llamador
-	-- recuerde ejecutar registerMutexTable().
-	if not mutexRegistrationIdsByTable[
-		mutexTable
-		] then
-		local registrationId,
-			registrationError =
-			GuardUtils.registerMutexTable(
-				mutexTable,
-				timeout
-				or CONFIG.DEFAULT_MUTEX_TIMEOUT
-			)
-
-		if not registrationId then
-			return nil, registrationError
-		end
-	end
-
-	local resolvedTimeout,
-		timeoutError =
-		resolveMutexTimeout(
-			mutexTable,
-			timeout
-		)
-
-	if not resolvedTimeout then
-		return nil, timeoutError
-	end
-
+	local duration = timeout or registration.Timeout
 	local now = os.clock()
-	local existingLock =
-		mutexTable[key]
-
-	if existingLock ~= nil then
-		if not isValidLockRecord(
-			existingLock
-			) then
-
-			warn(
-				"[GuardUtils] Se eliminó un mutex corrupto para la clave:",
-				key
-			)
-
-			mutexTable[key] = nil
-		elseif now < existingLock.ExpiresAt then
-			return nil, "LOCKED"
-		else
-			-- Expiró. Se elimina de forma perezosa sin esperar al watchdog.
-			if mutexTable[key]
-				== existingLock then
-
-				mutexTable[key] = nil
-			end
+	local old = registration.Locks[key]
+	if old then
+		if now < old.ExpiresAt then return nil, "LOCKED" end
+		dropLock(registration, key)
+	end
+	if registration.Count >= CONFIG.MAX_MUTEX_KEYS_PER_REGISTRATION then
+		pruneExpired(registration, now)
+		if registration.Count >= CONFIG.MAX_MUTEX_KEYS_PER_REGISTRATION then
+			return nil, "MUTEX_NAMESPACE_CAPACITY_REACHED"
 		end
 	end
-
-	local token =
-		HttpService:GenerateGUID(false)
-
-	mutexTable[key] = table.freeze({Token = token, LockedAt = now, ExpiresAt = now + resolvedTimeout})
+	if mutexRecordCount >= CONFIG.MAX_MUTEX_RECORDS then return nil, "MUTEX_RECORD_CAPACITY_REACHED" end
+	local token = HttpService:GenerateGUID(false)
+	registration.Locks[key] = {Token = token, ExpiresAt = now + duration}
+	registration.Count += 1
+	mutexRecordCount += 1
 	ensureStarted()
 	return token
 end
 
-function GuardUtils.releaseMutex(
-	mutexTable,
-	key,
-	token
-)
-	if not validateMutexTable(mutexTable) then
-		return false, "INVALID_MUTEX_TABLE"
-	end
+local function getOwnedLock(namespace, key, token)
+	if not validateMutexTable(namespace) then return nil, nil, "INVALID_MUTEX_TABLE" end
+	if not isValidMutexKey(key) then return nil, nil, "INVALID_KEY" end
+	if type(token) ~= "string" or token == "" then return nil, nil, "INVALID_TOKEN" end
+	local registration = getRegistration(namespace)
+	local lock = registration and registration.Locks[key]
+	if not lock then return nil, nil, "NOT_LOCKED" end
+	if lock.Token ~= token then return nil, nil, "NOT_OWNER" end
+	return registration, lock
+end
 
-	if not isValidMutexKey(key) then
-		return false, "INVALID_KEY"
-	end
-
-	if type(token) ~= "string"
-		or token == "" then
-
-		return false, "INVALID_TOKEN"
-	end
-
-	local lock = mutexTable[key]
-
-	if lock == nil then
-		return false, "NOT_LOCKED"
-	end
-
-	if not isValidLockRecord(lock) then
-		return false, "CORRUPT_LOCK"
-	end
-
-	if lock.Token ~= token then
-		return false, "NOT_OWNER"
-	end
-
-	-- La comparación vuelve a hacerse antes de borrar.
-	-- Impide eliminar un lock reemplazado.
-	if mutexTable[key] ~= lock then
-		return false, "LOCK_CHANGED"
-	end
-
-	mutexTable[key] = nil
-	if os.clock() >= lock.ExpiresAt then return false, "LOCK_EXPIRED" end
+function GuardUtils.releaseMutex(namespace, key, token)
+	local registration, lock, err = getOwnedLock(namespace, key, token)
+	if not lock then return false, err end
+	local expired = os.clock() >= lock.ExpiresAt
+	dropLock(registration, key)
+	if expired then return false, "LOCK_EXPIRED" end
 	return true
 end
 
-function GuardUtils.renewMutex(
-	mutexTable,
-	key,
-	token,
-	timeout
-)
-	if not validateMutexTable(mutexTable) then
-		return false, "INVALID_MUTEX_TABLE"
-	end
-
-	if not isValidMutexKey(key) then
-		return false, "INVALID_KEY"
-	end
-
-	if type(token) ~= "string"
-		or token == "" then
-
-		return false, "INVALID_TOKEN"
-	end
-
-	local resolvedTimeout,
-		timeoutError =
-		resolveMutexTimeout(
-			mutexTable,
-			timeout
-		)
-
-	if not resolvedTimeout then
-		return false, timeoutError
-	end
-
-	local lock = mutexTable[key]
-
-	if not isValidLockRecord(lock) then
-		return false,
-			lock == nil
-			and "NOT_LOCKED"
-			or "CORRUPT_LOCK"
-	end
-
-	if lock.Token ~= token then
-		return false, "NOT_OWNER"
-	end
-
+function GuardUtils.renewMutex(namespace, key, token, timeout)
+	if timeout ~= nil and not validateMutexTimeout(timeout) then return false, "INVALID_TIMEOUT" end
+	local registration, lock, err = getOwnedLock(namespace, key, token)
+	if not lock then return false, err end
 	local now = os.clock()
-
-	if now >= lock.ExpiresAt then return false, "LOCK_EXPIRED" end
-	mutexTable[key] = table.freeze({Token = token, LockedAt = now, ExpiresAt = now + resolvedTimeout})
+	if now >= lock.ExpiresAt then
+		dropLock(registration, key)
+		return false, "LOCK_EXPIRED"
+	end
+	lock.ExpiresAt = now + (timeout or registration.Timeout)
 	return true
 end
 
-function GuardUtils.isMutexLocked(
-	mutexTable,
-	key
-)
-	if not validateMutexTable(mutexTable)
-		or not isValidMutexKey(key) then
-
-		return false
-	end
-
-	local lock = mutexTable[key]
-
-	if not isValidLockRecord(lock) then
-		return false
-	end
-
-	return os.clock()
-		< lock.ExpiresAt
+function GuardUtils.ownsMutex(namespace, key, token)
+	local _, lock = getOwnedLock(namespace, key, token)
+	return lock ~= nil and os.clock() < lock.ExpiresAt
 end
 
--- Local lease ownership, not distributed fencing.
-function GuardUtils.ownsMutex(mutexTable, key, token)
-	if not validateMutexTable(mutexTable) or not isValidMutexKey(key) then return false end
-	if type(token) ~= "string" or token == "" then return false end
-	local lock = mutexTable[key]
-	return isValidLockRecord(lock) and lock.Token == token and os.clock() < lock.ExpiresAt
+function GuardUtils.isMutexLocked(namespace, key)
+	if not validateMutexTable(namespace) or not isValidMutexKey(key) then return false end
+	local registration = getRegistration(namespace)
+	local lock = registration and registration.Locks[key]
+	return lock ~= nil and os.clock() < lock.ExpiresAt
 end
 
--- Synchronous only. A yielded callback is closed; existing side effects cannot be undone.
-function GuardUtils.withMutex(mutexTable, key, callback, timeout)
+-- Synchronous only. Existing side effects cannot be undone when a callback fails.
+function GuardUtils.withMutex(namespace, key, callback, timeout)
 	if type(callback) ~= "function" then return false, "INVALID_CALLBACK" end
-	local token, acquireError = GuardUtils.acquireMutex(mutexTable, key, timeout)
+	local token, acquireError = GuardUtils.acquireMutex(namespace, key, timeout)
 	if not token then return false, acquireError end
 	local thread = coroutine.create(callback)
 	local result = table.pack(coroutine.resume(thread, token))
-	local yielded = coroutine.status(thread) ~= "dead"
-	if yielded then coroutine.close(thread) end
-	local released, releaseError = GuardUtils.releaseMutex(mutexTable, key, token)
-	if yielded then return false, "CALLBACK_YIELDED" end
+	local suspended = coroutine.status(thread) == "suspended"
+	if suspended then pcall(coroutine.close, thread) end
+	local released, releaseError = GuardUtils.releaseMutex(namespace, key, token)
 	if not result[1] then return false, "CALLBACK_ERROR", result[2] end
+	if suspended then return false, "CALLBACK_YIELDED" end
 	if not released then return false, "LOCK_OWNERSHIP_LOST", releaseError end
 	return true, table.unpack(result, 2, result.n)
 end
@@ -1069,54 +883,12 @@ local function cleanupRateLimits(now)
 	end
 end
 
-local function cleanupMutexRegistration(
-	registrationId,
-	registration,
-	now
-)
-	local mutexTable =
-		registration.MutexRef.Value
-
-	if not mutexTable then
-		mutexRegistrations[registrationId] = nil
-
-		return
-	end
-
-	if not validateMutexTable(mutexTable) then
-		mutexRegistrations[registrationId] = nil
-
-		mutexRegistrationIdsByTable[mutexTable] = nil
-
-		return
-	end
-
-	for key, lock in pairs(mutexTable) do
-		if not isValidMutexKey(key) then
-			warn(
-				"[GuardUtils] Watchdog eliminó una clave de mutex inválida."
-			)
-
-			mutexTable[key] = nil
-		elseif not isValidLockRecord(lock) then
-			warn(
-				"[GuardUtils] Watchdog eliminó un mutex corrupto para la clave:",
-				key
-			)
-
-			mutexTable[key] = nil
-		elseif now >= lock.ExpiresAt then
-			-- Borra únicamente si sigue siendo exactamente
-			-- el mismo registro observado.
-			if mutexTable[key] == lock then
-				warn(
-					"[GuardUtils] Watchdog liberó un mutex vencido para la clave:",
-					key
-				)
-
-				mutexTable[key] = nil
-			end
-		end
+local function cleanupMutexRegistration(id, registration, now)
+	-- Weak identity collection drops unreachable registrations and their accounting.
+	if registration.MutexRef.Value == nil then
+		dropRegistration(id, registration)
+	else
+		pruneExpired(registration, now)
 	end
 end
 
@@ -1172,40 +944,20 @@ function GuardUtils.Start()
 end
 
 -- clearState:
---   nil / true -> limpia estado interno y locks registrados.
+--   nil / true -> limpia estado interno sin modificar las tablas del llamador.
 --   false      -> detiene el watchdog pero conserva el estado.
 function GuardUtils.Stop(clearState)
-	if not running
-		and clearState == false then
-
-		return true
-	end
-
 	running = false
 	watchdogGeneration += 1
-
-	if clearState == false then
-		return true
-	end
-
+	if clearState == false then return true end
 	table.clear(rateLimitEntries)
 	rateLimitKeyCount = 0
 	rateLimitTimestampCount = 0
-
-	for registrationId, registration in pairs(
-		mutexRegistrations
-		) do
-		local mutexTable =
-			registration.MutexRef.Value
-
-		if mutexTable then
-			if validateMutexTable(mutexTable) then table.clear(mutexTable) end
-			mutexRegistrationIdsByTable[mutexTable] = nil
-		end
-
-		mutexRegistrations[registrationId] = nil
-	end
-
+	-- The namespace tables belong to callers; never clear or mutate them.
+	table.clear(mutexRegistrations)
+	table.clear(mutexRegistrationIdsByTable)
+	mutexRegistrationCount = 0
+	mutexRecordCount = 0
 	return true
 end
 
@@ -1213,30 +965,22 @@ GuardUtils.Destroy =
 	GuardUtils.Stop
 
 function GuardUtils.GetStats()
-	local registrationCount = 0
-	local activeMutexCount = 0
-
-	for _, registration in pairs(
-		mutexRegistrations
-		) do
-		registrationCount += 1
-
-		local mutexTable =
-			registration.MutexRef.Value
-
-		if mutexTable then
-			for _, lock in next, mutexTable do
-				if isValidLockRecord(lock) and os.clock() < lock.ExpiresAt then activeMutexCount += 1 end
+	local active = 0
+	local now = os.clock()
+	for _, registration in pairs(mutexRegistrations) do
+		if registration.MutexRef.Value ~= nil then
+			for _, lock in pairs(registration.Locks) do
+				if now < lock.ExpiresAt then active += 1 end
 			end
 		end
 	end
-
 	return {
 		Running = running,
 		RateLimitKeys = rateLimitKeyCount,
 		RateLimitTimestamps = rateLimitTimestampCount,
-		MutexRegistrations = registrationCount,
-		ActiveMutexes = activeMutexCount,
+		MutexRegistrations = mutexRegistrationCount,
+		MutexRecords = mutexRecordCount,
+		ActiveMutexes = active,
 	}
 end
 
