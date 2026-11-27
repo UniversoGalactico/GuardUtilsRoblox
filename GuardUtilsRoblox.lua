@@ -758,14 +758,14 @@ end
 -- Puede llamarse manualmente en pruebas.
 function GuardUtils.runMaintenance()
 	local now = os.clock()
-	local allSucceeded, rateError = xpcall(function() cleanupRateLimits(now); return nil end, debug.traceback)
+	local allSucceeded, rateError = xpcall(function() cleanupRateLimits(now); return "" end, function(err: any): string return debug.traceback(tostring(err)) end)
 	if not allSucceeded then warn("[GuardUtils] Rate maintenance:", rateError) end
 	for registrationId, registration in pairs(mutexRegistrations) do
 		if not registration then continue end
 		local succeeded, err = xpcall(function()
 			cleanupMutexRegistration(registrationId, registration, now)
-			return nil
-		end, debug.traceback)
+			return ""
+		end, function(problem: any): string return debug.traceback(tostring(problem)) end)
 		if not succeeded then
 			allSucceeded = false
 			warn("[GuardUtils] Mutex maintenance:", registrationId, err)
