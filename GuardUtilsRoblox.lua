@@ -18,7 +18,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.5" }
+local GuardUtils = { VERSION = "3.0.0-rc.6" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
@@ -65,10 +65,10 @@ type Registration = {
 	Count: number,
 }
 type ValidationPolicy = {
-	MaxKeysPerTable: number, MaxTotalNodes: number, MaxDepth: number,
-	MaxStringLength: number, MaxTotalBytes: number,
-	RejectMetatables: boolean, RequireUtf8: boolean, RejectNullBytes: boolean,
-	RequireArrayOrDictionary: boolean, RequireContiguousArrays: boolean,
+	read MaxKeysPerTable: number, read MaxTotalNodes: number, read MaxDepth: number,
+	read MaxStringLength: number, read MaxTotalBytes: number,
+	read RejectMetatables: boolean, read RequireUtf8: boolean, read RejectNullBytes: boolean,
+	read RequireArrayOrDictionary: boolean, read RequireContiguousArrays: boolean,
 }
 type ValidationState = {
 	TotalNodes: number, TotalBytes: number, ActiveTables: {[any]: boolean?}, Path: {any},
@@ -203,7 +203,7 @@ local function normalizeValidationOptions(options: any, strict: boolean): (Valid
 	}, nil
 end
 
-local function validateStringValue(value: string, options: ValidationPolicy, state: ValidationState)
+local function validateStringValue(value: string, options: ValidationPolicy, state: ValidationState): (boolean, string?)
 	if #value > CONFIG.HARD_MAX_STRING_BYTES then return false, "STRING_TOO_LONG" end
 	state.TotalBytes += #value
 	if state.TotalBytes > options.MaxTotalBytes then return false, "MAX_TOTAL_BYTES_EXCEEDED" end
@@ -215,7 +215,7 @@ local function validateStringValue(value: string, options: ValidationPolicy, sta
 		length = characters
 	end
 	if length > options.MaxStringLength then return false, "STRING_TOO_LONG" end
-	return true
+	return true, nil
 end
 
 local function validateTableKey(key: any, options: ValidationPolicy, state: ValidationState)
@@ -239,21 +239,21 @@ local function validationError(state: ValidationState, code: string, extraKey: a
 	return false, code, path
 end
 
-local function validateValue(value: any, options: ValidationPolicy, state: ValidationState, depth: number)
+local function validateValue(value: any, options: ValidationPolicy, state: ValidationState, depth: number): (boolean, string?, string?)
 	state.TotalNodes += 1
 	if state.TotalNodes > options.MaxTotalNodes then return validationError(state, "MAX_TOTAL_NODES_EXCEEDED") end
 
 	local kind = type(value)
-	if kind == "boolean" then return true end
+	if kind == "boolean" then return true, nil, nil end
 	if kind == "number" then
 		if not isFiniteNumber(value) then return validationError(state, "INVALID_NUMBER") end
 		if math.abs(value) > CONFIG.MAX_SAFE_INTEGER then return validationError(state, "NUMBER_OUT_OF_SAFE_RANGE") end
-		return true
+		return true, nil, nil
 	end
 	if kind == "string" then
 		local ok, code = validateStringValue(value, options, state)
 		if not ok then return validationError(state, code or "INVALID_STRING") end
-		return true
+		return true, nil, nil
 	end
 	if kind ~= "table" then return validationError(state, "UNSUPPORTED_TYPE_" .. kind) end
 	if depth > options.MaxDepth then return validationError(state, "MAX_DEPTH_EXCEEDED") end
@@ -286,10 +286,10 @@ local function validateValue(value: any, options: ValidationPolicy, state: Valid
 		return validationError(state, "NON_CONTIGUOUS_ARRAY")
 	end
 	state.ActiveTables[value] = nil
-	return true
+	return true, nil, nil
 end
 
-local function validateRoot(value: any, options: any?, strict: boolean)
+local function validateRoot(value: any, options: any?, strict: boolean): (boolean, string?, string?)
 	if value == nil then return false, "NIL_ROOT", "$" end
 	local policy, code = normalizeValidationOptions(options, strict)
 	if not policy then return false, code, "$" end
@@ -313,12 +313,13 @@ function GuardUtils.isDataStoreSafe(value: any, options: any?)
 end
 
 function GuardUtils.jugadorValido(player: any): boolean
-	return typeof(player) == "Instance"
+	local kind = typeof(player)
+	return kind == "Instance"
 		and player:IsA("Player")
 		and player.Parent == Players
 end
 
-function GuardUtils.datosCargados(player: any, isLoadedFunc: any)
+function GuardUtils.datosCargados(player: any, isLoadedFunc: any): (boolean, string?)
 	if not GuardUtils.jugadorValido(player) then
 		return false, "INVALID_PLAYER"
 	end
@@ -343,7 +344,7 @@ function GuardUtils.datosCargados(player: any, isLoadedFunc: any)
 	end
 
 	if not GuardUtils.jugadorValido(player) then return false, "INVALID_PLAYER" end
-	return result == true
+	return result == true, nil
 end
 
 -- ==========================================================================
@@ -354,7 +355,7 @@ end
 --   cleanedString
 -- o:
 --   nil, errorCode
-function GuardUtils.sanitizeString(value: any, maxLength: any?)
+function GuardUtils.sanitizeString(value: any, maxLength: any?): (string?, string?)
 	if type(value) ~= "string" then
 		return nil, "INVALID_TYPE"
 	end
@@ -369,7 +370,7 @@ function GuardUtils.sanitizeString(value: any, maxLength: any?)
 
 	-- Quita caracteres de control, incluido el byte nulo.
 	local cleaned =
-		value:gsub("%c", "")
+		string.gsub(value :: string, "%c", "")
 
 	-- Quita espacios exteriores después de limpiar.
 	cleaned =
@@ -389,7 +390,7 @@ function GuardUtils.sanitizeString(value: any, maxLength: any?)
 		return nil, "STRING_TOO_LONG"
 	end
 
-	return cleaned
+	return cleaned, nil
 end
 
 -- options:
@@ -398,7 +399,7 @@ end
 --
 -- Por seguridad, Clamp es false de forma predeterminada.
 -- Un valor fuera del rango se rechaza en vez de corregirse silenciosamente.
-function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, options: any?)
+function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, options: any?): (number?, string?)
 	if not isFiniteNumber(value) then
 		return nil, "INVALID_NUMBER"
 	end
@@ -449,7 +450,7 @@ function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, opt
 			)
 	end
 
-	return sanitized
+	return sanitized, nil
 end
 
 -- ==========================================================================
@@ -500,7 +501,7 @@ end
 --
 -- Ante configuración inválida falla de forma cerrada:
 -- devuelve true para no desactivar accidentalmente la protección.
-function GuardUtils.isRateLimited(key: any, limit: any?, window: any?)
+function GuardUtils.isRateLimited(key: any, limit: any?, window: any?): (boolean, string?)
 	if not validateRateLimitKey(key) then return true, "INVALID_KEY" end
 	if limit == nil then limit = CONFIG.MAX_REQUESTS_PER_WINDOW end
 	if window == nil then window = CONFIG.DEFAULT_RATE_LIMIT_WINDOW end
@@ -512,31 +513,33 @@ function GuardUtils.isRateLimited(key: any, limit: any?, window: any?)
 		if entry.WindowSeconds ~= window or entry.Limit ~= limit then return true, "RATE_LIMIT_POLICY_MISMATCH" end
 		cleanupRateEntry(entry, now, window)
 		entry.LastSeen = now
-		if getActiveRateCount(entry) >= limit then return true end
+		if getActiveRateCount(entry) >= limit then return true, nil end
 	elseif rateLimitKeyCount >= CONFIG.MAX_RATE_LIMIT_KEYS then
 		return true, "RATE_LIMIT_CAPACITY_REACHED"
 	end
 	if rateLimitTimestampCount >= CONFIG.MAX_RATE_TIMESTAMPS then return true, "RATE_LIMIT_TIMESTAMP_CAPACITY_REACHED" end
 	if not entry then
-		entry = {Timestamps = {}, Head = 1, LastSeen = now, WindowSeconds = window, Limit = limit}
-		rateLimitEntries[key] = entry
+		local created: RateEntry = {Timestamps = {}, Head = 1, LastSeen = now, WindowSeconds = window, Limit = limit}
+		rateLimitEntries[key] = created
+		entry = created
 		rateLimitKeyCount += 1
 	end
+	if not entry then return true, "RATE_LIMIT_STATE_LOST" end
 	table.insert(entry.Timestamps, now)
 	rateLimitTimestampCount += 1
-	return false
+	return false, nil
 end
-function GuardUtils.cleanupRateLimit(key: any)
+function GuardUtils.cleanupRateLimit(key: any): (boolean, string?)
 	if not validateRateLimitKey(key) then return false, "INVALID_KEY" end
 	removeRateEntry(key)
-	return true
+	return true, nil
 end
-function GuardUtils.cleanupRateLimitPrefix(prefix: any)
+function GuardUtils.cleanupRateLimitPrefix(prefix: any): (boolean, string?)
 	if not validateRateLimitKey(prefix) then return false, "INVALID_PREFIX" end
 	for key in pairs(rateLimitEntries) do
 		if key:sub(1, #prefix) == prefix then removeRateEntry(key) end
 	end
-	return true
+	return true, nil
 end
 
 -- ==========================================================================
@@ -583,7 +586,7 @@ local function dropRegistration(id: string, registration: Registration)
 	mutexRegistrations[id] = nil
 end
 
-function GuardUtils.registerMutexTable(namespace: any, timeout: any?)
+function GuardUtils.registerMutexTable(namespace: any, timeout: any?): (string?, string?)
 	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
 	if timeout == nil then timeout = CONFIG.DEFAULT_MUTEX_TIMEOUT end
 	if not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
@@ -591,7 +594,7 @@ function GuardUtils.registerMutexTable(namespace: any, timeout: any?)
 	if registration then
 		registration.Timeout = timeout
 		ensureStarted()
-		return id
+		return id, nil
 	end
 	if mutexRegistrationCount >= CONFIG.MAX_MUTEX_REGISTRATIONS then
 		for oldId, old in pairs(mutexRegistrations) do
@@ -611,10 +614,10 @@ function GuardUtils.registerMutexTable(namespace: any, timeout: any?)
 	mutexRegistrationIdsByTable[namespace] = newId
 	mutexRegistrationCount += 1
 	ensureStarted()
-	return newId
+	return newId, nil
 end
 
-function GuardUtils.unregisterMutexTable(identifier: any)
+function GuardUtils.unregisterMutexTable(identifier: any): (boolean, string?)
 	local id: string? = nil
 	if type(identifier) == "string" then
 		id = identifier
@@ -629,11 +632,11 @@ function GuardUtils.unregisterMutexTable(identifier: any)
 	pruneExpired(registration, os.clock())
 	if registration.Count > 0 then return false, "ACTIVE_LEASES" end
 	dropRegistration(id, registration)
-	return true
+	return true, nil
 end
 
 -- A timeout override belongs only to this acquisition/renewal, never to the namespace policy.
-function GuardUtils.acquireMutex(namespace: any, key: any, timeout: any?)
+function GuardUtils.acquireMutex(namespace: any, key: any, timeout: any?): (string?, string?)
 	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
 	if not isValidMutexKey(key) then return nil, "INVALID_KEY" end
 	if timeout ~= nil and not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
@@ -664,7 +667,7 @@ function GuardUtils.acquireMutex(namespace: any, key: any, timeout: any?)
 	registration.Count += 1
 	mutexRecordCount += 1
 	ensureStarted()
-	return token
+	return token, nil
 end
 
 local function getOwnedLock(namespace: any, key: any, token: any): (Registration?, Lease?, string?)
@@ -679,16 +682,16 @@ local function getOwnedLock(namespace: any, key: any, token: any): (Registration
 	return registration, lock, nil
 end
 
-function GuardUtils.releaseMutex(namespace: any, key: any, token: any)
+function GuardUtils.releaseMutex(namespace: any, key: any, token: any): (boolean, string?)
 	local registration, lock, err = getOwnedLock(namespace, key, token)
 	if not registration or not lock then return false, err end
 	local expired = os.clock() >= lock.ExpiresAt
 	dropLock(registration, key)
 	if expired then return false, "LOCK_EXPIRED" end
-	return true
+	return true, nil
 end
 
-function GuardUtils.renewMutex(namespace: any, key: any, token: any, timeout: any?)
+function GuardUtils.renewMutex(namespace: any, key: any, token: any, timeout: any?): (boolean, string?)
 	if timeout ~= nil and not validateMutexTimeout(timeout) then return false, "INVALID_TIMEOUT" end
 	local registration, lock, err = getOwnedLock(namespace, key, token)
 	if not registration or not lock then return false, err end
@@ -698,7 +701,7 @@ function GuardUtils.renewMutex(namespace: any, key: any, token: any, timeout: an
 		return false, "LOCK_EXPIRED"
 	end
 	lock.ExpiresAt = now + (timeout or registration.Timeout)
-	return true
+	return true, nil
 end
 
 function GuardUtils.ownsMutex(namespace: any, key: any, token: any): boolean
@@ -714,12 +717,12 @@ function GuardUtils.isMutexLocked(namespace: any, key: any): boolean
 end
 
 -- Synchronous only. Existing side effects cannot be undone when a callback fails.
-function GuardUtils.withMutex(namespace: any, key: any, callback: any, timeout: any?)
+function GuardUtils.withMutex(namespace: any, key: any, callback: any, timeout: any?): (boolean, ...any)
 	if type(callback) ~= "function" then return false, "INVALID_CALLBACK" end
 	local token, acquireError = GuardUtils.acquireMutex(namespace, key, timeout)
 	if not token then return false, acquireError end
 	local thread = coroutine.create(callback)
-	local result = table.pack(coroutine.resume(thread, token))
+	local result = table.pack(coroutine.resume(thread, token)) :: { [number]: any, n: number }
 	local suspended = coroutine.status(thread) == "suspended"
 	if suspended then pcall(coroutine.close, thread) end
 	local released, releaseError = GuardUtils.releaseMutex(namespace, key, token)
@@ -755,12 +758,13 @@ end
 -- Puede llamarse manualmente en pruebas.
 function GuardUtils.runMaintenance()
 	local now = os.clock()
-	local allSucceeded, rateError = xpcall(function() cleanupRateLimits(now) end, debug.traceback)
+	local allSucceeded, rateError = xpcall(function() cleanupRateLimits(now); return nil end, debug.traceback)
 	if not allSucceeded then warn("[GuardUtils] Rate maintenance:", rateError) end
 	for registrationId, registration in pairs(mutexRegistrations) do
 		if not registration then continue end
 		local succeeded, err = xpcall(function()
 			cleanupMutexRegistration(registrationId, registration, now)
+			return nil
 		end, debug.traceback)
 		if not succeeded then
 			allSucceeded = false
@@ -795,7 +799,7 @@ startWatchdog = GuardUtils.Start
 -- clearState:
 --   nil / true -> limpia estado interno sin modificar las tablas del llamador.
 --   false      -> detiene el watchdog pero conserva el estado.
-function GuardUtils.Stop(clearState: any?)
+function GuardUtils.Stop(clearState: any?): (boolean, string?)
 	if clearState ~= nil and type(clearState) ~= "boolean" then return false, "INVALID_CLEAR_STATE" end
 	running = false
 	watchdogGeneration += 1
@@ -805,7 +809,7 @@ function GuardUtils.Stop(clearState: any?)
 		local ok, err = pcall(task.cancel, handle)
 		if not ok then warn("[GuardUtils] Watchdog cancellation failed:", err) end
 	end
-	if clearState == false then return true end
+	if clearState == false then return true, nil end
 	table.clear(rateLimitEntries)
 	rateLimitKeyCount = 0
 	rateLimitTimestampCount = 0
@@ -814,7 +818,7 @@ function GuardUtils.Stop(clearState: any?)
 	table.clear(mutexRegistrationIdsByTable)
 	mutexRegistrationCount = 0
 	mutexRecordCount = 0
-	return true
+	return true, nil
 end
 
 GuardUtils.Destroy =
@@ -849,20 +853,20 @@ end
 --   - ciclos.
 --
 -- No copia metatables.
-function GuardUtils.deepCopy(original: any)
-	if type(original) ~= "table" then return original end
+function GuardUtils.deepCopy(original: any): (any, string?)
+	if type(original) ~= "table" then return original, nil end
 	local root = {}
 	local seen: {[any]: any} = {[original] = root}
 	local pending: {any} = {original}
 	local cursor, edges = 1, 0
-	local function intern(value: any)
-		if type(value) ~= "table" then return value end
-		if seen[value] then return seen[value] end
+	local function intern(value: any): (any, string?)
+		if type(value) ~= "table" then return value, nil end
+		if seen[value] then return seen[value], nil end
 		if #pending >= CONFIG.HARD_MAX_NODES then return nil, "COPY_TABLE_LIMIT" end
 		local copy = {}
 		seen[value] = copy
 		table.insert(pending, value)
-		return copy
+		return copy, nil
 	end
 	while cursor <= #pending do
 		local source = pending[cursor]
@@ -878,11 +882,11 @@ function GuardUtils.deepCopy(original: any)
 			target[copyKey] = copyValue
 		end
 	end
-	return root
+	return root, nil
 end
 
 function GuardUtils.generarId(prefijo: any?): string
-	local prefix = if type(prefijo) == "string" then prefijo:sub(1, 40) else "id"
+	local prefix = if type(prefijo) == "string" then string.sub(prefijo :: string, 1, 40) else "id"
 	prefix = prefix:gsub("[^%w_%-]", "_")
 	if prefix == "" then prefix = "id" end
 	return prefix .. "_" .. HttpService:GenerateGUID(false)
