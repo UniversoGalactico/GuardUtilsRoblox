@@ -159,4 +159,72 @@ test("copy cycles, aliases and deep chains",function()
 	for _=1,3000 do copy=copy.next end
 	eq(type(copy),"table")
 end)
+test("private namespaces isolate caller data and reject live unregister",function()
+	local locks={unrelated="preserved"}
+	local id=assert(Guard.registerMutexTable(locks,10))
+	local token=assert(Guard.acquireMutex(locks,"x",2))
+	eq(locks.x,nil)
+	locks.x={Token="forged",ExpiresAt=1000}
+	eq(Guard.ownsMutex(locks,"x",token),true)
+	eq(Guard.ownsMutex(locks,"x","forged"),false)
+	eq(Guard.acquireMutex(locks,"x"),nil)
+	local ok,code=Guard.unregisterMutexTable(id)
+	eq(ok,false);eq(code,"ACTIVE_LEASES")
+	clock=2
+	eq(Guard.unregisterMutexTable(id),true)
+	eq(Guard.GetStats().MutexRecords,0)
+	eq(Guard.GetStats().MutexRegistrations,0)
+	eq(locks.unrelated,"preserved")
+	eq(locks.x.Token,"forged")
+	local nextToken=assert(Guard.acquireMutex(locks,"x"))
+	Guard.Stop()
+	eq(Guard.ownsMutex(locks,"x",nextToken),false)
+	eq(locks.x.Token,"forged")
+end)
+test("namespace default and per-lease overrides",function()
+	local locks={}
+	Guard.registerMutexTable(locks,10)
+	local a=assert(Guard.acquireMutex(locks,"a",1))
+	local b=assert(Guard.acquireMutex(locks,"b"))
+	clock=1
+	eq(Guard.ownsMutex(locks,"a",a),false)
+	eq(Guard.ownsMutex(locks,"b",b),true)
+	clock=10
+	eq(Guard.ownsMutex(locks,"b",b),false)
+	eq(Guard.acquireMutex(locks,string.rep("k",201)),nil)
+end)
+test("mutex capacity accounting and recovery",function()
+	local namespaces={}
+	for n=1,32 do
+		local locks={};namespaces[n]=locks
+		for k=1,1024 do assert(Guard.acquireMutex(locks,k,10)) end
+		local token,code=Guard.acquireMutex(locks,1025,10)
+		eq(token,nil);eq(code,"MUTEX_NAMESPACE_CAPACITY_REACHED")
+	end
+	eq(Guard.GetStats().MutexRecords,32768)
+	eq(Guard.GetStats().ActiveMutexes,32768)
+	local overflow={}
+	local token,code=Guard.acquireMutex(overflow,1,10)
+	eq(token,nil);eq(code,"MUTEX_RECORD_CAPACITY_REACHED")
+	clock=10;eq(Guard.runMaintenance(),true)
+	eq(Guard.GetStats().MutexRecords,0)
+	assert(Guard.acquireMutex(overflow,1,10))
+	eq(Guard.GetStats().MutexRecords,1)
+end)
+test("rate denied request restarts stopped maintenance",function()
+	eq(Guard.isRateLimited("x",1,10),false)
+	Guard.Stop(false)
+	eq(Guard.GetStats().Running,false)
+	eq(Guard.isRateLimited("x",1,10),true)
+	eq(Guard.GetStats().Running,true)
+end)
+test("callback cannot falsely report retained ownership after Stop",function()
+	local locks={}
+	local ok,code=Guard.withMutex(locks,1,function()
+		Guard.Stop()
+		assert(Guard.acquireMutex(locks,1))
+	end)
+	eq(ok,false);eq(code,"LOCK_OWNERSHIP_LOST")
+	eq(Guard.isMutexLocked(locks,1),true)
+end)
 print("PASS "..count.." suites")
