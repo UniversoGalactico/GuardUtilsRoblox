@@ -34,6 +34,9 @@ local CONFIG = table.freeze({
 	MAX_REQUESTS_PER_WINDOW = 10,
 	DEFAULT_RATE_LIMIT_WINDOW = 1,
 	MAX_RATE_LIMIT_KEYS = 10000,
+	MAX_RATE_REQUESTS = 1000,
+	MAX_RATE_WINDOW = 3600,
+	MAX_RATE_TIMESTAMPS = 100000,
 	RATE_LIMIT_KEY_TTL = 120,
 	MAX_RATE_LIMIT_KEY_LENGTH = 200,
 
@@ -46,6 +49,7 @@ local CONFIG = table.freeze({
 
 local rateLimitEntries = {}
 local rateLimitKeyCount = 0
+local rateLimitTimestampCount = 0
 
 -- [registrationId] = {
 --     MutexRef = weakValueReference,
@@ -598,72 +602,33 @@ local function validateRateLimitKey(key)
 		and #key <= CONFIG.MAX_RATE_LIMIT_KEY_LENGTH
 end
 
-local function validateRateLimitConfig(
-	maxRequests,
-	windowSeconds
-)
-	if not isPositiveInteger(maxRequests) then
-		return false
-	end
-
-	if not isFiniteNumber(windowSeconds)
-		or windowSeconds <= 0 then
-
-		return false
-	end
-
-	return true
+local function validateRateLimitConfig(limit, window)
+	return isPositiveInteger(limit) and limit <= CONFIG.MAX_RATE_REQUESTS
+		and isFiniteNumber(window) and window > 0 and window <= CONFIG.MAX_RATE_WINDOW
 end
-
-local function compactRateEntry(entry)
-	local timestamps = entry.Timestamps
-	local head = entry.Head
-
-	if head <= 1 then
-		return
-	end
-
-	local compacted = {}
-
-	for index = head, #timestamps do
-		table.insert(
-			compacted,
-			timestamps[index]
-		)
-	end
-
-	entry.Timestamps = compacted
-	entry.Head = 1
-end
-
-local function cleanupRateEntry(
-	entry,
-	now,
-	windowSeconds
-)
-	local timestamps = entry.Timestamps
-	local head = entry.Head
-
-	while timestamps[head]
-		and now - timestamps[head]
-		>= windowSeconds do
-
-		head += 1
-	end
-
-	entry.Head = head
-
-	if head > 64
-		and head > #timestamps / 2 then
-
-		compactRateEntry(entry)
-	end
-end
-
 local function getActiveRateCount(entry)
-	return #entry.Timestamps
-	- entry.Head
-		+ 1
+	return #entry.Timestamps - entry.Head + 1
+end
+local function cleanupRateEntry(entry, now, window)
+	local stamps, head = entry.Timestamps, entry.Head
+	while stamps[head] and now - stamps[head] >= window do head += 1 end
+	rateLimitTimestampCount -= head - entry.Head
+	entry.Head = head
+	if head > #stamps then
+		entry.Timestamps, entry.Head = {}, 1
+	elseif head > 64 then
+		local kept = {}
+		for i = head, #stamps do table.insert(kept, stamps[i]) end
+		entry.Timestamps, entry.Head = kept, 1
+	end
+end
+local function removeRateEntry(key)
+	local entry = rateLimitEntries[key]
+	if entry then
+		rateLimitTimestampCount -= getActiveRateCount(entry)
+		rateLimitKeyCount -= 1
+		rateLimitEntries[key] = nil
+	end
 end
 
 local function ensureStarted()
@@ -677,129 +642,42 @@ end
 --
 -- Ante configuración inválida falla de forma cerrada:
 -- devuelve true para no desactivar accidentalmente la protección.
-function GuardUtils.isRateLimited(
-	key,
-	maxRequestsPerWindow,
-	windowSeconds
-)
-	ensureStarted()
-
-	if not validateRateLimitKey(key) then
-		warn(
-			"[GuardUtils] Clave de rate limit inválida."
-		)
-
-		return true, "INVALID_KEY"
-	end
-
-	local limit =
-		maxRequestsPerWindow
-		or CONFIG.MAX_REQUESTS_PER_WINDOW
-
-	local window =
-		windowSeconds
-		or CONFIG.DEFAULT_RATE_LIMIT_WINDOW
-
-	if not validateRateLimitConfig(
-		limit,
-		window
-		) then
-
-		warn(
-			"[GuardUtils] Configuración de rate limit inválida."
-		)
-
-		return true, "INVALID_RATE_LIMIT_CONFIG"
-	end
-
+function GuardUtils.isRateLimited(key, limit, window)
+	if not validateRateLimitKey(key) then return true, "INVALID_KEY" end
+	if limit == nil then limit = CONFIG.MAX_REQUESTS_PER_WINDOW end
+	if window == nil then window = CONFIG.DEFAULT_RATE_LIMIT_WINDOW end
+	if not validateRateLimitConfig(limit, window) then return true, "INVALID_RATE_LIMIT_CONFIG" end
 	local now = os.clock()
 	local entry = rateLimitEntries[key]
-
+	if entry then
+		if entry.WindowSeconds ~= window or entry.Limit ~= limit then return true, "RATE_LIMIT_POLICY_MISMATCH" end
+		cleanupRateEntry(entry, now, window)
+		entry.LastSeen = now
+		if getActiveRateCount(entry) >= limit then return true end
+	elseif rateLimitKeyCount >= CONFIG.MAX_RATE_LIMIT_KEYS then
+		return true, "RATE_LIMIT_CAPACITY_REACHED"
+	end
+	if rateLimitTimestampCount >= CONFIG.MAX_RATE_TIMESTAMPS then return true, "RATE_LIMIT_TIMESTAMP_CAPACITY_REACHED" end
 	if not entry then
-		if rateLimitKeyCount
-			>= CONFIG.MAX_RATE_LIMIT_KEYS then
-
-			return true,
-				"RATE_LIMIT_CAPACITY_REACHED"
-		end
-
-		entry = {
-			Timestamps = {},
-			Head = 1,
-			LastSeen = now,
-			WindowSeconds = window,
-		}
-
+		entry = {Timestamps = {}, Head = 1, LastSeen = now, WindowSeconds = window, Limit = limit}
 		rateLimitEntries[key] = entry
 		rateLimitKeyCount += 1
-	else
-		-- La ventana queda ligada a la clave.
-		-- Si el llamador cambia de configuración, se limpia el historial
-		-- para evitar mezclar ventanas incompatibles.
-		if entry.WindowSeconds ~= window then
-			entry.Timestamps = {}
-			entry.Head = 1
-			entry.WindowSeconds = window
-		end
-
-		entry.LastSeen = now
 	end
-
-	cleanupRateEntry(
-		entry,
-		now,
-		window
-	)
-
-	if getActiveRateCount(entry)
-		>= limit then
-
-		return true
-	end
-
-	table.insert(
-		entry.Timestamps,
-		now
-	)
-
+	table.insert(entry.Timestamps, now)
+	rateLimitTimestampCount += 1
+	ensureStarted()
 	return false
 end
-
 function GuardUtils.cleanupRateLimit(key)
-	if type(key) ~= "string" then
-		return false, "INVALID_KEY"
-	end
-
-	if rateLimitEntries[key] then
-		rateLimitEntries[key] = nil
-		rateLimitKeyCount =
-			math.max(
-				rateLimitKeyCount - 1,
-				0
-			)
-	end
-
+	if not validateRateLimitKey(key) then return false, "INVALID_KEY" end
+	removeRateEntry(key)
 	return true
 end
-
 function GuardUtils.cleanupRateLimitPrefix(prefix)
-	if type(prefix) ~= "string"
-		or prefix == "" then
-
-		return false, "INVALID_PREFIX"
-	end
-
+	if not validateRateLimitKey(prefix) then return false, "INVALID_PREFIX" end
 	for key in pairs(rateLimitEntries) do
-		if key:sub(1, #prefix) == prefix then
-			rateLimitEntries[key] = nil
-			rateLimitKeyCount =
-				math.max(
-					rateLimitKeyCount - 1,
-					0
-				)
-		end
+		if key:sub(1, #prefix) == prefix then removeRateEntry(key) end
 	end
-
 	return true
 end
 
@@ -1231,29 +1109,10 @@ end
 -- ==========================================================================
 
 local function cleanupRateLimits(now)
-	for key, entry in pairs(
-		rateLimitEntries
-		) do
-		local window =
-			entry.WindowSeconds
-			or CONFIG.DEFAULT_RATE_LIMIT_WINDOW
-
-		cleanupRateEntry(
-			entry,
-			now,
-			window
-		)
-
-		if getActiveRateCount(entry) <= 0
-			and now - entry.LastSeen
-			>= CONFIG.RATE_LIMIT_KEY_TTL then
-
-			rateLimitEntries[key] = nil
-			rateLimitKeyCount =
-				math.max(
-					rateLimitKeyCount - 1,
-					0
-				)
+	for key, entry in pairs(rateLimitEntries) do
+		cleanupRateEntry(entry, now, entry.WindowSeconds)
+		if getActiveRateCount(entry) <= 0 and now - entry.LastSeen >= CONFIG.RATE_LIMIT_KEY_TTL then
+			removeRateEntry(key)
 		end
 	end
 end
@@ -1409,6 +1268,7 @@ function GuardUtils.Stop(clearState)
 
 	table.clear(rateLimitEntries)
 	rateLimitKeyCount = 0
+	rateLimitTimestampCount = 0
 
 	for registrationId, registration in pairs(
 		mutexRegistrations
@@ -1452,6 +1312,7 @@ function GuardUtils.GetStats()
 	return {
 		Running = running,
 		RateLimitKeys = rateLimitKeyCount,
+		RateLimitTimestamps = rateLimitTimestampCount,
 		MutexRegistrations = registrationCount,
 		ActiveMutexes = activeMutexCount,
 	}
