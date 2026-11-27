@@ -71,6 +71,10 @@ The previous README omitted required owner tokens. Always pass them to releaseMu
 
 Run `python3 tests/run.py --luau /path/to/luau`. The harness runs actual module source with a deterministic clock, cooperative watchdog scheduler and minimal Roblox service doubles. The regression suite includes independent breadth-first validation decisions, sliding-window and lease models, graph-copy identity checks, scheduler-generation tests and global capacity boundaries. The module uses strict Luau annotations for internal state; boundary functions intentionally accept any malformed runtime input. Run `python3 tests/typecheck.py --analyzer /path/to/luau-analyze` for standalone strict analysis with Roblox globals stubbed. It does not certify Studio's real scheduler, network services or distributed behavior.
 
+## Benchmark
+
+Run `python3 tests/run.py --luau /path/to/luau --benchmark` for five-sample median microbenchmarks. CI runs the same benchmark against the original public commit and current module. These are controlled local VM diagnostics, not Roblox production latency or memory measurements. CI uses official Luau 0.734 with the published SHA-256 pinned.
+
 ## Español
 
 Biblioteca defensiva para Roblox. La versión candidata limita recursos, valida referencias compartidas, mantiene políticas de rate limiting estables y distingue propiedad temporal de exclusión distribuida. No usar withMutex para callbacks que cedan ejecución. No sustituye pruebas de integración en Studio.

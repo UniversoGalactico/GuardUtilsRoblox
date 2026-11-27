@@ -1,25 +1,39 @@
 name: GuardUtils regression
 on:
   push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: guardutils-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   luau:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Build pinned official Luau CLI
+          fetch-depth: 0
+      - name: Install checksum-pinned official Luau 0.734
         run: |
-          git clone https://github.com/luau-lang/luau.git "$RUNNER_TEMP/luau"
-          git -C "$RUNNER_TEMP/luau" checkout d518d14b922ff80e7e17d1912d637225472117a1
-          cmake -S "$RUNNER_TEMP/luau" -B "$RUNNER_TEMP/luau-build" -DCMAKE_BUILD_TYPE=Release -DLUAU_BUILD_TESTS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build "$RUNNER_TEMP/luau-build" --target Luau.Repl.CLI Luau.Analyze.CLI --parallel 4
+          archive="$RUNNER_TEMP/luau-ubuntu.zip"
+          curl --fail --location --retry 3 https://github.com/luau-lang/luau/releases/download/0.734/luau-ubuntu.zip --output "$archive"
+          echo "3e514385267c6606f1ff6824bd9d21708a5dd272ea91ab7355a2743b20d45d45  $archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/luau"
+          unzip -q "$archive" -d "$RUNNER_TEMP/luau"
+          chmod +x "$RUNNER_TEMP/luau/luau" "$RUNNER_TEMP/luau/luau-analyze"
       - name: Regression and differential tests
-        run: python3 tests/run.py --luau "$RUNNER_TEMP/luau-build/luau"
+        run: python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau"
       - name: Strict type analysis of production source
-        run: python3 tests/typecheck.py --analyzer "$RUNNER_TEMP/luau-build/luau-analyze"
+        run: python3 tests/typecheck.py --analyzer "$RUNNER_TEMP/luau/luau-analyze"
+      - name: Comparative microbenchmarks (diagnostic)
+        run: |
+          git show 1117a32f0a1e33ff001d29c72c5a63da2264450f:GuardUtilsRoblox.lua > "$RUNNER_TEMP/guardutils-baseline.lua"
+          echo "BASELINE 1117a32"
+          python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau" --benchmark --source "$RUNNER_TEMP/guardutils-baseline.lua"
+          echo "CURRENT"
+          python3 tests/run.py --luau "$RUNNER_TEMP/luau/luau" --benchmark

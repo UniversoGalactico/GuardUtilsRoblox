@@ -8,8 +8,11 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--luau", default="luau")
+parser.add_argument("--source", type=Path, default=root / "GuardUtilsRoblox.lua")
+parser.add_argument("--benchmark", action="store_true")
 args = parser.parse_args()
 prefix = r'''
+local realClock = os.clock
 local clock = 0
 local os = {clock = function() return clock end}
 local serial = 0
@@ -71,8 +74,9 @@ local task = {
 local warn = function(...) end
 local Guard = (function()
 '''
-source = (root / "GuardUtilsRoblox.lua").read_text(encoding="utf-8")
-tests = (root / "tests/regression.luau").read_text(encoding="utf-8")
+source = args.source.read_text(encoding="utf-8")
+suite = "benchmark.luau" if args.benchmark else "regression.luau"
+tests = (root / "tests" / suite).read_text(encoding="utf-8")
 with tempfile.TemporaryDirectory() as directory:
     script = Path(directory) / "guardutils-test.luau"
     script.write_text(prefix + source + "\nend)()\n" + tests, encoding="utf-8")
