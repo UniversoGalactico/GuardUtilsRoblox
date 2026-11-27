@@ -1,0 +1,21 @@
+name: GuardUtils regression
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  luau:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pinned official Luau CLI
+        run: |
+          git clone https://github.com/luau-lang/luau.git "$RUNNER_TEMP/luau"
+          git -C "$RUNNER_TEMP/luau" checkout d518d14b922ff80e7e17d1912d637225472117a1
+          cmake -S "$RUNNER_TEMP/luau" -B "$RUNNER_TEMP/luau-build" -DCMAKE_BUILD_TYPE=Release -DLUAU_BUILD_TESTS=OFF
+          cmake --build "$RUNNER_TEMP/luau-build" --target Luau.Repl.CLI --parallel 2
+      - name: Regression and differential tests
+        run: python3 tests/run.py --luau "$RUNNER_TEMP/luau-build/luau"
