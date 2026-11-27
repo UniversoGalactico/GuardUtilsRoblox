@@ -45,6 +45,7 @@ local CONFIG = table.freeze({
 	WATCHDOG_INTERVAL = 1,
 	DEFAULT_MUTEX_TIMEOUT = 30,
 	MAX_MUTEX_TIMEOUT = 3600,
+	MAX_MUTEX_REGISTRATIONS = 1024,
 })
 
 local rateLimitEntries = {}
@@ -688,6 +689,7 @@ end
 local function validateMutexTable(mutexTable)
 	return type(mutexTable) == "table"
 		and getmetatable(mutexTable) == nil
+		and not table.isfrozen(mutexTable)
 end
 
 local function validateMutexTimeout(timeout)
@@ -698,6 +700,7 @@ end
 
 local function isValidLockRecord(lock)
 	return type(lock) == "table"
+		and getmetatable(lock) == nil
 		and type(lock.Token) == "string"
 		and lock.Token ~= ""
 		and isFiniteNumber(lock.LockedAt)
@@ -751,15 +754,9 @@ function GuardUtils.registerMutexTable(
 	mutexTable,
 	timeout
 )
-	ensureStarted()
-
-	if not validateMutexTable(mutexTable) then
-		return nil, "INVALID_MUTEX_TABLE"
-	end
-
-	local resolvedTimeout =
-		timeout
-		or CONFIG.DEFAULT_MUTEX_TIMEOUT
+	if not validateMutexTable(mutexTable) then return nil, "INVALID_MUTEX_TABLE" end
+	local resolvedTimeout = timeout
+	if resolvedTimeout == nil then resolvedTimeout = CONFIG.DEFAULT_MUTEX_TIMEOUT end
 
 	if not validateMutexTimeout(
 		resolvedTimeout
@@ -779,8 +776,12 @@ function GuardUtils.registerMutexTable(
 		return existingId
 	end
 
-	local registrationId =
-		HttpService:GenerateGUID(false)
+	local count = 0
+	for id, registration in pairs(mutexRegistrations) do
+		if registration.MutexRef.Value == nil then mutexRegistrations[id] = nil else count += 1 end
+	end
+	if count >= CONFIG.MAX_MUTEX_REGISTRATIONS then return nil, "MUTEX_REGISTRATION_CAPACITY_REACHED" end
+	local registrationId = HttpService:GenerateGUID(false)
 
 	mutexRegistrations[registrationId] = {
 		MutexRef =
@@ -792,7 +793,7 @@ function GuardUtils.registerMutexTable(
 	}
 
 	mutexRegistrationIdsByTable[mutexTable] = registrationId
-
+	ensureStarted()
 	return registrationId
 end
 
@@ -821,6 +822,7 @@ function GuardUtils.unregisterMutexTable(
 	local registration =
 		mutexRegistrations[registrationId]
 
+	if not registration then return false, "NOT_REGISTERED" end
 	if registration then
 		local mutexTable =
 			registration.MutexRef.Value
@@ -844,12 +846,8 @@ function GuardUtils.acquireMutex(
 	key,
 	timeout
 )
-	ensureStarted()
-
-	if not validateMutexTable(mutexTable) then
-		return nil, "INVALID_MUTEX_TABLE"
-	end
-
+	if not validateMutexTable(mutexTable) then return nil, "INVALID_MUTEX_TABLE" end
+	if timeout ~= nil and not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
 	if not isValidMutexKey(key) then
 		return nil, "INVALID_KEY"
 	end
@@ -914,13 +912,8 @@ function GuardUtils.acquireMutex(
 	local token =
 		HttpService:GenerateGUID(false)
 
-	mutexTable[key] = {
-		Token = token,
-		LockedAt = now,
-		ExpiresAt =
-			now + resolvedTimeout,
-	}
-
+	mutexTable[key] = table.freeze({Token = token, LockedAt = now, ExpiresAt = now + resolvedTimeout})
+	ensureStarted()
 	return token
 end
 
@@ -964,6 +957,7 @@ function GuardUtils.releaseMutex(
 	end
 
 	mutexTable[key] = nil
+	if os.clock() >= lock.ExpiresAt then return false, "LOCK_EXPIRED" end
 	return true
 end
 
@@ -1013,10 +1007,8 @@ function GuardUtils.renewMutex(
 
 	local now = os.clock()
 
-	lock.LockedAt = now
-	lock.ExpiresAt =
-		now + resolvedTimeout
-
+	if now >= lock.ExpiresAt then return false, "LOCK_EXPIRED" end
+	mutexTable[key] = table.freeze({Token = token, LockedAt = now, ExpiresAt = now + resolvedTimeout})
 	return true
 end
 
@@ -1040,68 +1032,28 @@ function GuardUtils.isMutexLocked(
 		< lock.ExpiresAt
 end
 
--- Ejecuta una función bajo mutex y siempre intenta liberar.
---
--- Retorna:
---   true, ...resultadosDelCallback
--- o:
---   false, errorCode, detalle?
-function GuardUtils.withMutex(
-	mutexTable,
-	key,
-	callback,
-	timeout
-)
-	if type(callback) ~= "function" then
-		return false, "INVALID_CALLBACK"
-	end
+-- Local lease ownership, not distributed fencing.
+function GuardUtils.ownsMutex(mutexTable, key, token)
+	if not validateMutexTable(mutexTable) or not isValidMutexKey(key) then return false end
+	if type(token) ~= "string" or token == "" then return false end
+	local lock = mutexTable[key]
+	return isValidLockRecord(lock) and lock.Token == token and os.clock() < lock.ExpiresAt
+end
 
-	local token, acquireError =
-		GuardUtils.acquireMutex(
-			mutexTable,
-			key,
-			timeout
-		)
-
-	if not token then
-		return false, acquireError
-	end
-
-	local packedResults
-
-	local succeeded, callbackError =
-		xpcall(
-			function()
-				packedResults = table.pack(callback(token))
-			end,
-			debug.traceback
-		)
-
-	local released, releaseError =
-		GuardUtils.releaseMutex(
-			mutexTable,
-			key,
-			token
-		)
-
-	if not succeeded then
-		return false,
-			"CALLBACK_ERROR",
-			callbackError
-	end
-
-	if not released then
-		return false,
-			"LOCK_OWNERSHIP_LOST",
-			releaseError
-	end
-
-	return true,
-		table.unpack(
-			packedResults,
-			1,
-			packedResults.n
-		)
+-- Synchronous only. A yielded callback is closed; existing side effects cannot be undone.
+function GuardUtils.withMutex(mutexTable, key, callback, timeout)
+	if type(callback) ~= "function" then return false, "INVALID_CALLBACK" end
+	local token, acquireError = GuardUtils.acquireMutex(mutexTable, key, timeout)
+	if not token then return false, acquireError end
+	local thread = coroutine.create(callback)
+	local result = table.pack(coroutine.resume(thread, token))
+	local yielded = coroutine.status(thread) ~= "dead"
+	if yielded then coroutine.close(thread) end
+	local released, releaseError = GuardUtils.releaseMutex(mutexTable, key, token)
+	if yielded then return false, "CALLBACK_YIELDED" end
+	if not result[1] then return false, "CALLBACK_ERROR", result[2] end
+	if not released then return false, "LOCK_OWNERSHIP_LOST", releaseError end
+	return true, table.unpack(result, 2, result.n)
 end
 
 -- ==========================================================================
@@ -1171,48 +1123,18 @@ end
 -- Puede llamarse manualmente en pruebas.
 function GuardUtils.runMaintenance()
 	local now = os.clock()
-
-	local rateSucceeded,
-		rateError =
-		xpcall(
-			function()
-				cleanupRateLimits(now)
-			end,
-			debug.traceback
-		)
-
-	if not rateSucceeded then
-		warn(
-			"[GuardUtils] Error limpiando rate limits:",
-			rateError
-		)
-	end
-
-	for registrationId, registration in pairs(
-		mutexRegistrations
-		) do
-		local succeeded, maintenanceError =
-			xpcall(
-				function()
-					cleanupMutexRegistration(
-						registrationId,
-						registration,
-						now
-					)
-				end,
-				debug.traceback
-			)
-
+	local allSucceeded, rateError = xpcall(function() cleanupRateLimits(now) end, debug.traceback)
+	if not allSucceeded then warn("[GuardUtils] Rate maintenance:", rateError) end
+	for registrationId, registration in pairs(mutexRegistrations) do
+		local succeeded, err = xpcall(function()
+			cleanupMutexRegistration(registrationId, registration, now)
+		end, debug.traceback)
 		if not succeeded then
-			warn(
-				"[GuardUtils] Error limpiando registro de mutex:",
-				registrationId,
-				maintenanceError
-			)
+			allSucceeded = false
+			warn("[GuardUtils] Mutex maintenance:", registrationId, err)
 		end
 	end
-
-	return rateSucceeded
+	return allSucceeded
 end
 
 function GuardUtils.Start()
@@ -1277,7 +1199,7 @@ function GuardUtils.Stop(clearState)
 			registration.MutexRef.Value
 
 		if mutexTable then
-			table.clear(mutexTable)
+			if validateMutexTable(mutexTable) then table.clear(mutexTable) end
 			mutexRegistrationIdsByTable[mutexTable] = nil
 		end
 
@@ -1303,8 +1225,8 @@ function GuardUtils.GetStats()
 			registration.MutexRef.Value
 
 		if mutexTable then
-			for _ in pairs(mutexTable) do
-				activeMutexCount += 1
+			for _, lock in next, mutexTable do
+				if isValidLockRecord(lock) and os.clock() < lock.ExpiresAt then activeMutexCount += 1 end
 			end
 		end
 	end
