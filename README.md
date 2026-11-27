@@ -2,7 +2,7 @@
 
 Defensive Luau utilities for server-side validation, sanitization, rate limiting, lease ownership and graph copying.
 
-**3.0.0-rc.7 — review candidate; not a production certification.** MIT. No external runtime dependencies.
+**3.0.0-rc.8 — review candidate; not a production certification.** MIT. No external runtime dependencies.
 
 ## Install
 
@@ -85,6 +85,10 @@ python3 tests/luauproof_attack.py --luauproof /path/to/extracted/luauproof \
 ```
 
 [Audit evidence](tests/evidence/rc7/) records the target hash, original toolkit hashes, seeds, exact expected category counts, results and elapsed execution time. The matched comparison of rc.6 and rc.7 runs 303,258 checks each; the extended campaign runs 2,066,392 checks across four VM configurations. These counts are repeated observations across optimization modes, including checks of the numerical oracle; they are not distinct vulnerabilities, independent attack payloads or formal proofs. The external toolkit is not needed to run the standard CI suites. Neither the test harness nor this audit replaces tests in Roblox Studio, DataStore, or the actual Roblox scheduler.
+
+## Quick Roblox Studio smoke test
+
+In a blank place, create a Folder in ServerScriptService with a ModuleScript named `GuardUtils` containing the module and a Script containing [studio_smoke.server.lua](tests/studio_smoke.server.lua). Press Play and inspect Output for 10/10 PASS. The test intentionally uses an isolated module because it calls Stop() and clears state. It exercises the real scheduler, including task.wait cancellation, but does not cover production load or DataStore writes. rc.8 adjusts strict annotations and watchdog initialization without changing the tested rc.7 numerical algorithm; the recorded rc.7 fuzz evidence remains bound to the original source hash.
 
 ## Benchmark
 

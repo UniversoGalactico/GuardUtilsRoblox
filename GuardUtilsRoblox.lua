@@ -18,7 +18,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.7" }
+local GuardUtils = { VERSION = "3.0.0-rc.8" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
@@ -95,7 +95,7 @@ local mutexRegistrationIdsByTable: {[any]: string?} = setmetatable(
 local running = false
 local watchdogGeneration = 0
 local watchdogThread: thread? = nil
-local startWatchdog: (() -> boolean)? = nil
+local startWatchdog: () -> boolean = function(): boolean return false end
 local lastClock = 0
 
 -- ==========================================================================
@@ -186,12 +186,13 @@ local function defaultValidationPolicy(strict: boolean): ValidationPolicy
 end
 local GENERIC_DEFAULTS = defaultValidationPolicy(false)
 local STRICT_DEFAULTS = defaultValidationPolicy(true)
-local VALIDATION_OPTION_KEYS = table.freeze({
+local VALIDATION_OPTION_KEYS: {[string]: boolean} = {
 	MaxKeysPerTable = true, MaxTotalNodes = true, MaxDepth = true,
 	MaxStringLength = true, MaxTotalBytes = true, RejectMetatables = true,
 	RequireUtf8 = true, RejectNullBytes = true, RequireArrayOrDictionary = true,
 	RequireContiguousArrays = true,
-})
+}
+table.freeze(VALIDATION_OPTION_KEYS)
 
 local function hasOnlyOptions(options: {[any]: any}, allowed: {[string]: boolean}): boolean
 	-- At most the number of recognized keys plus one iteration. Never execute
@@ -439,7 +440,8 @@ end
 --
 -- Por seguridad, Clamp es false de forma predeterminada.
 -- Un valor fuera del rango se rechaza en vez de corregirse silenciosamente.
-local NUMBER_OPTION_KEYS = table.freeze({Integer = true, Clamp = true})
+local NUMBER_OPTION_KEYS: {[string]: boolean} = {Integer = true, Clamp = true}
+table.freeze(NUMBER_OPTION_KEYS)
 
 function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, options: any?): (number?, string?)
 	if not isFiniteNumber(value) then
@@ -548,8 +550,7 @@ end
 
 local function ensureStarted(): boolean
 	if watchdogHealthy() then return true end
-	local start = startWatchdog
-	return start ~= nil and start()
+	return startWatchdog()
 end
 
 -- Retorna:
