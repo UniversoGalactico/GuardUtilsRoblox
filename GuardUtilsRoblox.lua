@@ -17,13 +17,19 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = {}
+local GuardUtils = { VERSION = "3.0.0-rc.1" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
 	MAX_TOTAL_NODES = 10000,
 	MAX_DEPTH = 16,
 	MAX_STRING_LENGTH = 10000,
+	MAX_TOTAL_BYTES = 4 * 1024 * 1024,
+	HARD_MAX_STRING_BYTES = 65536,
+	HARD_MAX_DEPTH = 64,
+	HARD_MAX_NODES = 100000,
+	HARD_MAX_KEYS = 10000,
+	HARD_MAX_TOTAL_BYTES = 16 * 1024 * 1024,
 
 	MAX_REQUESTS_PER_WINDOW = 10,
 	DEFAULT_RATE_LIMIT_WINDOW = 1,
@@ -102,23 +108,13 @@ local function createWeakValueReference(value)
 end
 
 local function makePath(parentPath, key)
-	if type(key) == "number" then
-		return parentPath
-			.. "["
-			.. tostring(key)
-			.. "]"
-	end
-
-	if type(key) == "string"
-		and key:match("^[%a_][%w_]*$") then
-
-		return parentPath .. "." .. key
-	end
-
-	return parentPath
-		.. "["
-		.. string.format("%q", tostring(key))
-		.. "]"
+	local kind = type(key)
+	if kind == "number" then return parentPath .. "[" .. tostring(key) .. "]" end
+	if kind ~= "string" then return parentPath .. "[<" .. kind .. " key>]" end
+	local preview = key:sub(1, 64)
+	if #key > 64 then preview = preview .. "..." end
+	if preview:match("^[%a_][%w_]*$") then return parentPath .. "." .. preview end
+	return parentPath .. "[" .. string.format("%q", preview) .. "]"
 end
 
 local function validateUtf8(value)
@@ -127,55 +123,43 @@ local function validateUtf8(value)
 end
 
 local function normalizeValidationOptions(options)
-	options = type(options) == "table"
-		and options
-		or {}
-
-	local normalized = {
-		MaxKeysPerTable =
-			options.MaxKeysPerTable
-			or CONFIG.MAX_KEYS_PER_TABLE,
-
-		MaxTotalNodes =
-			options.MaxTotalNodes
-			or CONFIG.MAX_TOTAL_NODES,
-
-		MaxDepth =
-			options.MaxDepth
-			or CONFIG.MAX_DEPTH,
-
-		MaxStringLength =
-			options.MaxStringLength
-			or CONFIG.MAX_STRING_LENGTH,
-
-		RejectMetatables =
-			options.RejectMetatables ~= false,
-
-		RequireUtf8 =
-			options.RequireUtf8 ~= false,
-
-		RejectNullBytes =
-			options.RejectNullBytes ~= false,
-
-		RequireArrayOrDictionary =
-			options.RequireArrayOrDictionary == true,
-
-		RequireContiguousArrays =
-			options.RequireContiguousArrays == true,
-	}
-
-	if not isPositiveInteger(normalized.MaxKeysPerTable)
-		or not isPositiveInteger(normalized.MaxTotalNodes)
-		or not isPositiveInteger(normalized.MaxDepth)
-		or not isPositiveInteger(normalized.MaxStringLength) then
-
+	if options == nil then options = {} end
+	if type(options) ~= "table" or getmetatable(options) ~= nil then
 		return nil, "INVALID_VALIDATION_OPTIONS"
 	end
-
+	local normalized = {}
+	local bounds = {
+		MaxKeysPerTable = {CONFIG.MAX_KEYS_PER_TABLE, CONFIG.HARD_MAX_KEYS},
+		MaxTotalNodes = {CONFIG.MAX_TOTAL_NODES, CONFIG.HARD_MAX_NODES},
+		MaxDepth = {CONFIG.MAX_DEPTH, CONFIG.HARD_MAX_DEPTH},
+		MaxStringLength = {CONFIG.MAX_STRING_LENGTH, CONFIG.HARD_MAX_STRING_BYTES},
+		MaxTotalBytes = {CONFIG.MAX_TOTAL_BYTES, CONFIG.HARD_MAX_TOTAL_BYTES},
+	}
+	for name, bound in pairs(bounds) do
+		local value = rawget(options, name)
+		if value == nil then value = bound[1] end
+		if not isPositiveInteger(value) or value > bound[2] then
+			return nil, "INVALID_VALIDATION_OPTIONS"
+		end
+		normalized[name] = value
+	end
+	local flags = {
+		RejectMetatables = true, RequireUtf8 = true, RejectNullBytes = true,
+		RequireArrayOrDictionary = false, RequireContiguousArrays = false,
+	}
+	for name, default in pairs(flags) do
+		local value = rawget(options, name)
+		if value == nil then value = default end
+		if type(value) ~= "boolean" then return nil, "INVALID_VALIDATION_OPTIONS" end
+		normalized[name] = value
+	end
 	return normalized
 end
 
-local function validateStringValue(value, options)
+local function validateStringValue(value, options, state)
+	if #value > CONFIG.HARD_MAX_STRING_BYTES then return false, "STRING_TOO_LONG" end
+	state.TotalBytes += #value
+	if state.TotalBytes > options.MaxTotalBytes then return false, "MAX_TOTAL_BYTES_EXCEEDED" end
 	if options.RejectNullBytes
 		and value:find("\0", 1, true) then
 
@@ -203,12 +187,12 @@ local function validateStringValue(value, options)
 	return true
 end
 
-local function validateTableKey(key, options)
+local function validateTableKey(key, options, state)
 	local keyType = type(key)
 
 	if keyType == "string" then
 		local valid, errorCode =
-			validateStringValue(key, options)
+			validateStringValue(key, options, state)
 
 		if not valid then
 			return false, "INVALID_KEY_" .. errorCode
@@ -267,7 +251,7 @@ local function validateValue(
 
 	if valueType == "string" then
 		local valid, errorCode =
-			validateStringValue(value, options)
+			validateStringValue(value, options, state)
 
 		if not valid then
 			return false, errorCode, path
@@ -298,10 +282,6 @@ local function validateValue(
 		return false, "CYCLIC_REFERENCE", path
 	end
 
-	if state.ValidatedTables[value] then
-		return true
-	end
-
 	state.ActiveTables[value] = true
 
 	local keyCount = 0
@@ -309,7 +289,7 @@ local function validateValue(
 	local numericKeyCount = 0
 	local maximumNumericKey = 0
 
-	for key, childValue in pairs(value) do
+	for key, childValue in next, value do
 		keyCount += 1
 
 		if keyCount > options.MaxKeysPerTable then
@@ -319,7 +299,7 @@ local function validateValue(
 		end
 
 		local keyValid, keyKindOrError =
-			validateTableKey(key, options)
+			validateTableKey(key, options, state)
 
 		if not keyValid then
 			return false,
@@ -375,7 +355,6 @@ local function validateValue(
 	end
 
 	state.ActiveTables[value] = nil
-	state.ValidatedTables[value] = true
 
 	return true
 end
@@ -402,25 +381,8 @@ function GuardUtils.validateData(value, options)
 		return false, optionsError, "$"
 	end
 
-	local state = {
-		TotalNodes = 0,
+	local state = {TotalNodes = 0, TotalBytes = 0, ActiveTables = {}}
 
-		ActiveTables =
-			setmetatable(
-				{},
-				{
-					__mode = "k",
-				}
-			),
-
-		ValidatedTables =
-			setmetatable(
-				{},
-				{
-					__mode = "k",
-				}
-			),
-	}
 
 	return validateValue(
 		value,
@@ -445,6 +407,8 @@ function GuardUtils.isValidData(value, maxKeys)
 		}
 	elseif type(maxKeys) == "table" then
 		options = maxKeys
+	elseif maxKeys ~= nil then
+		return false
 	end
 
 	local valid =
@@ -462,38 +426,14 @@ end
 --   - una tabla debe ser array o diccionario, no ambos;
 --   - los arrays deben ser contiguos desde 1.
 function GuardUtils.isDataStoreSafe(value, options)
-	options = type(options) == "table"
-		and options
-		or {}
-
-	local strictOptions = {
-		MaxKeysPerTable =
-			options.MaxKeysPerTable
-			or CONFIG.MAX_KEYS_PER_TABLE,
-
-		MaxTotalNodes =
-			options.MaxTotalNodes
-			or CONFIG.MAX_TOTAL_NODES,
-
-		MaxDepth =
-			options.MaxDepth
-			or CONFIG.MAX_DEPTH,
-
-		MaxStringLength =
-			options.MaxStringLength
-			or CONFIG.MAX_STRING_LENGTH,
-
-		RejectMetatables = true,
-		RequireUtf8 = true,
-		RejectNullBytes = true,
-		RequireArrayOrDictionary = true,
-		RequireContiguousArrays = true,
-	}
-
-	return GuardUtils.validateData(
-		value,
-		strictOptions
-	)
+	local strict, code = normalizeValidationOptions(options)
+	if not strict then return false, code, "$" end
+	strict.RejectMetatables = true
+	strict.RequireUtf8 = true
+	strict.RejectNullBytes = true
+	strict.RequireArrayOrDictionary = true
+	strict.RequireContiguousArrays = true
+	return GuardUtils.validateData(value, strict)
 end
 
 function GuardUtils.jugadorValido(player)
@@ -548,13 +488,13 @@ function GuardUtils.sanitizeString(
 		return nil, "INVALID_TYPE"
 	end
 
-	local limit =
-		maxLength
-		or 1000
+	local limit = maxLength
+	if limit == nil then limit = 1000 end
 
-	if not isPositiveInteger(limit) then
+	if not isPositiveInteger(limit) or limit > CONFIG.HARD_MAX_STRING_BYTES then
 		return nil, "INVALID_MAX_LENGTH"
 	end
+	if #value > CONFIG.HARD_MAX_STRING_BYTES then return nil, "STRING_TOO_LONG" end
 
 	-- Quita caracteres de control, incluido el byte nulo.
 	local cleaned =
@@ -599,15 +539,9 @@ function GuardUtils.sanitizeNumber(
 		return nil, "INVALID_NUMBER"
 	end
 
-	local minValue =
-		minimum ~= nil
-		and minimum
-		or 0
-
-	local maxValue =
-		maximum ~= nil
-		and maximum
-		or CONFIG.MAX_SAFE_INTEGER
+	local minValue, maxValue = minimum, maximum
+	if minValue == nil then minValue = 0 end
+	if maxValue == nil then maxValue = CONFIG.MAX_SAFE_INTEGER end
 
 	if not isFiniteNumber(minValue)
 		or not isFiniteNumber(maxValue)
@@ -618,10 +552,10 @@ function GuardUtils.sanitizeNumber(
 		return nil, "INVALID_RANGE"
 	end
 
-	options = type(options) == "table"
-		and options
-		or {}
-
+	if options == nil then options = {} end
+	if type(options) ~= "table" or getmetatable(options) ~= nil then return nil, "INVALID_OPTIONS" end
+	if (options.Integer ~= nil and type(options.Integer) ~= "boolean")
+		or (options.Clamp ~= nil and type(options.Clamp) ~= "boolean") then return nil, "INVALID_OPTIONS" end
 	local integerMode =
 		options.Integer ~= false
 
@@ -631,6 +565,8 @@ function GuardUtils.sanitizeNumber(
 	local sanitized = value
 
 	if integerMode then
+		minValue, maxValue = math.ceil(minValue), math.floor(maxValue)
+		if minValue > maxValue then return nil, "INVALID_RANGE" end
 		sanitized = math.floor(sanitized)
 	end
 
@@ -1531,33 +1467,34 @@ end
 --
 -- No copia metatables.
 function GuardUtils.deepCopy(original)
-	if type(original) ~= "table" then
-		return original
-	end
-
-	local seen = {}
-
-	local function copyValue(value)
-		if type(value) ~= "table" then
-			return value
-		end
-
-		if seen[value] then
-			return seen[value]
-		end
-
+	if type(original) ~= "table" then return original end
+	local root = {}
+	local seen, pending = {[original] = root}, {original}
+	local cursor, edges = 1, 0
+	local function intern(value)
+		if type(value) ~= "table" then return value end
+		if seen[value] then return seen[value] end
+		if #pending >= CONFIG.HARD_MAX_NODES then return nil, "COPY_TABLE_LIMIT" end
 		local copy = {}
 		seen[value] = copy
-
-		for key, childValue in pairs(value) do
-			copy[copyValue(key)] =
-				copyValue(childValue)
-		end
-
+		table.insert(pending, value)
 		return copy
 	end
-
-	return copyValue(original)
+	while cursor <= #pending do
+		local source = pending[cursor]
+		local target = seen[source]
+		cursor += 1
+		for key, value in next, source do
+			edges += 1
+			if edges > CONFIG.HARD_MAX_NODES then return nil, "COPY_EDGE_LIMIT" end
+			local copyKey, keyError = intern(key)
+			if keyError then return nil, keyError end
+			local copyValue, valueError = intern(value)
+			if valueError then return nil, valueError end
+			target[copyKey] = copyValue
+		end
+	end
+	return root
 end
 
 function GuardUtils.generarId(prefijo)
