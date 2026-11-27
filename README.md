@@ -2,7 +2,7 @@
 
 Defensive Luau utilities for server-side validation, sanitization, rate limiting, lease ownership and graph copying.
 
-**3.0.0-rc.3 — review candidate; not a production certification.** MIT. No external runtime dependencies.
+**3.0.0-rc.4 — review candidate; not a production certification.** MIT. No external runtime dependencies.
 
 ## Install
 
@@ -69,7 +69,7 @@ The previous README omitted required owner tokens. Always pass them to releaseMu
 
 ## Tests
 
-Run `python3 tests/run.py --luau /path/to/luau`. The harness runs actual module source with a deterministic clock, cooperative watchdog scheduler and minimal Roblox service doubles. The regression suite includes independent breadth-first validation decisions, sliding-window and lease models, graph-copy identity checks, scheduler-generation tests and global capacity boundaries. It does not certify Studio's real scheduler, network services or distributed behavior.
+Run `python3 tests/run.py --luau /path/to/luau`. The harness runs actual module source with a deterministic clock, cooperative watchdog scheduler and minimal Roblox service doubles. The regression suite includes independent breadth-first validation decisions, sliding-window and lease models, graph-copy identity checks, scheduler-generation tests and global capacity boundaries. The module uses strict Luau annotations for internal state; boundary functions intentionally accept any malformed runtime input. Run `python3 tests/typecheck.py --analyzer /path/to/luau-analyze` for standalone strict analysis with Roblox globals stubbed. It does not certify Studio's real scheduler, network services or distributed behavior.
 
 ## Español
 

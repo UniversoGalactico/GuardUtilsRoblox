@@ -18,6 +18,8 @@ jobs:
           git clone https://github.com/luau-lang/luau.git "$RUNNER_TEMP/luau"
           git -C "$RUNNER_TEMP/luau" checkout d518d14b922ff80e7e17d1912d637225472117a1
           cmake -S "$RUNNER_TEMP/luau" -B "$RUNNER_TEMP/luau-build" -DCMAKE_BUILD_TYPE=Release -DLUAU_BUILD_TESTS=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5
-          cmake --build "$RUNNER_TEMP/luau-build" --target Luau.Repl.CLI --parallel 4
+          cmake --build "$RUNNER_TEMP/luau-build" --target Luau.Repl.CLI Luau.Analyze.CLI --parallel 4
       - name: Regression and differential tests
         run: python3 tests/run.py --luau "$RUNNER_TEMP/luau-build/luau"
+      - name: Strict type analysis of production source
+        run: python3 tests/typecheck.py --analyzer "$RUNNER_TEMP/luau-build/luau-analyze"
