@@ -17,7 +17,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.2" }
+local GuardUtils = { VERSION = "3.0.0-rc.3" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
@@ -129,36 +129,49 @@ local function validateUtf8(value)
 	return length ~= nil, length
 end
 
-local function normalizeValidationOptions(options)
-	if options == nil then options = {} end
+-- Shared immutable default policies avoid rebuilding option maps on every request.
+local VALIDATION_BOUNDS = table.freeze({
+	MaxKeysPerTable = {CONFIG.MAX_KEYS_PER_TABLE, CONFIG.HARD_MAX_KEYS},
+	MaxTotalNodes = {CONFIG.MAX_TOTAL_NODES, CONFIG.HARD_MAX_NODES},
+	MaxDepth = {CONFIG.MAX_DEPTH, CONFIG.HARD_MAX_DEPTH},
+	MaxStringLength = {CONFIG.MAX_STRING_LENGTH, CONFIG.HARD_MAX_STRING_BYTES},
+	MaxTotalBytes = {CONFIG.MAX_TOTAL_BYTES, CONFIG.HARD_MAX_TOTAL_BYTES},
+})
+local VALIDATION_FLAGS = table.freeze({
+	RejectMetatables = true,
+	RequireUtf8 = true,
+	RejectNullBytes = true,
+	RequireArrayOrDictionary = false,
+	RequireContiguousArrays = false,
+})
+
+local function defaultValidationPolicy(strict)
+	local policy = {}
+	for name, bound in pairs(VALIDATION_BOUNDS) do policy[name] = bound[1] end
+	for name, default in pairs(VALIDATION_FLAGS) do policy[name] = strict or default end
+	return table.freeze(policy)
+end
+
+local GENERIC_DEFAULTS = defaultValidationPolicy(false)
+local STRICT_DEFAULTS = defaultValidationPolicy(true)
+
+local function normalizeValidationOptions(options, strict)
+	if options == nil then return if strict then STRICT_DEFAULTS else GENERIC_DEFAULTS end
 	if type(options) ~= "table" or getmetatable(options) ~= nil then
 		return nil, "INVALID_VALIDATION_OPTIONS"
 	end
 	local normalized = {}
-	local bounds = {
-		MaxKeysPerTable = {CONFIG.MAX_KEYS_PER_TABLE, CONFIG.HARD_MAX_KEYS},
-		MaxTotalNodes = {CONFIG.MAX_TOTAL_NODES, CONFIG.HARD_MAX_NODES},
-		MaxDepth = {CONFIG.MAX_DEPTH, CONFIG.HARD_MAX_DEPTH},
-		MaxStringLength = {CONFIG.MAX_STRING_LENGTH, CONFIG.HARD_MAX_STRING_BYTES},
-		MaxTotalBytes = {CONFIG.MAX_TOTAL_BYTES, CONFIG.HARD_MAX_TOTAL_BYTES},
-	}
-	for name, bound in pairs(bounds) do
+	for name, bound in pairs(VALIDATION_BOUNDS) do
 		local value = rawget(options, name)
 		if value == nil then value = bound[1] end
-		if not isPositiveInteger(value) or value > bound[2] then
-			return nil, "INVALID_VALIDATION_OPTIONS"
-		end
+		if not isPositiveInteger(value) or value > bound[2] then return nil, "INVALID_VALIDATION_OPTIONS" end
 		normalized[name] = value
 	end
-	local flags = {
-		RejectMetatables = true, RequireUtf8 = true, RejectNullBytes = true,
-		RequireArrayOrDictionary = false, RequireContiguousArrays = false,
-	}
-	for name, default in pairs(flags) do
+	for name, default in pairs(VALIDATION_FLAGS) do
 		local value = rawget(options, name)
 		if value == nil then value = default end
 		if type(value) ~= "boolean" then return nil, "INVALID_VALIDATION_OPTIONS" end
-		normalized[name] = value
+		normalized[name] = strict or value
 	end
 	return normalized
 end
@@ -167,280 +180,109 @@ local function validateStringValue(value, options, state)
 	if #value > CONFIG.HARD_MAX_STRING_BYTES then return false, "STRING_TOO_LONG" end
 	state.TotalBytes += #value
 	if state.TotalBytes > options.MaxTotalBytes then return false, "MAX_TOTAL_BYTES_EXCEEDED" end
-	if options.RejectNullBytes
-		and value:find("\0", 1, true) then
-
-		return false, "NULL_BYTE"
-	end
-
-	local stringLength
-
+	if options.RejectNullBytes and value:find("\0", 1, true) then return false, "NULL_BYTE" end
+	local length = #value
 	if options.RequireUtf8 then
-		local validUtf8
-		validUtf8, stringLength =
-			validateUtf8(value)
-
-		if not validUtf8 then
-			return false, "INVALID_UTF8"
-		end
-	else
-		stringLength = #value
+		local characters = utf8.len(value)
+		if characters == nil then return false, "INVALID_UTF8" end
+		length = characters
 	end
-
-	if stringLength > options.MaxStringLength then
-		return false, "STRING_TOO_LONG"
-	end
-
+	if length > options.MaxStringLength then return false, "STRING_TOO_LONG" end
 	return true
 end
 
 local function validateTableKey(key, options, state)
-	local keyType = type(key)
-
-	if keyType == "string" then
-		local valid, errorCode =
-			validateStringValue(key, options, state)
-
-		if not valid then
-			return false, "INVALID_KEY_" .. errorCode
-		end
-
+	local kind = type(key)
+	if kind == "string" then
+		local ok, code = validateStringValue(key, options, state)
+		if not ok then return false, "INVALID_KEY_" .. code end
 		return true, "STRING"
-	end
-
-	if keyType == "number" then
-		if not isPositiveInteger(key)
-			or key > CONFIG.MAX_SAFE_INTEGER then
-
-			return false, "INVALID_NUMERIC_KEY"
-		end
-
+	elseif kind == "number" then
+		if not isPositiveInteger(key) or key > CONFIG.MAX_SAFE_INTEGER then return false, "INVALID_NUMERIC_KEY" end
 		return true, "NUMBER"
 	end
-
 	return false, "INVALID_KEY_TYPE"
 end
 
-local function validateValue(
-	value,
-	options,
-	state,
-	depth,
-	path
-)
+-- Track keys, not concatenated paths. Render a bounded diagnostic only on failure.
+local function validationError(state, code, extraKey)
+	local path = "$"
+	for _, key in ipairs(state.Path) do path = makePath(path, key) end
+	if extraKey ~= nil then path = makePath(path, extraKey) end
+	return false, code, path
+end
+
+local function validateValue(value, options, state, depth)
 	state.TotalNodes += 1
+	if state.TotalNodes > options.MaxTotalNodes then return validationError(state, "MAX_TOTAL_NODES_EXCEEDED") end
 
-	if state.TotalNodes > options.MaxTotalNodes then
-		return false,
-			"MAX_TOTAL_NODES_EXCEEDED",
-			path
-	end
-
-	local valueType = type(value)
-
-	if valueType == "boolean" then
+	local kind = type(value)
+	if kind == "boolean" then return true end
+	if kind == "number" then
+		if not isFiniteNumber(value) then return validationError(state, "INVALID_NUMBER") end
+		if math.abs(value) > CONFIG.MAX_SAFE_INTEGER then return validationError(state, "NUMBER_OUT_OF_SAFE_RANGE") end
 		return true
 	end
-
-	if valueType == "number" then
-		if not isFiniteNumber(value) then
-			return false, "INVALID_NUMBER", path
-		end
-
-		if math.abs(value)
-			> CONFIG.MAX_SAFE_INTEGER then
-
-			return false, "NUMBER_OUT_OF_SAFE_RANGE", path
-		end
-
+	if kind == "string" then
+		local ok, code = validateStringValue(value, options, state)
+		if not ok then return validationError(state, code) end
 		return true
 	end
-
-	if valueType == "string" then
-		local valid, errorCode =
-			validateStringValue(value, options, state)
-
-		if not valid then
-			return false, errorCode, path
-		end
-
-		return true
-	end
-
-	if valueType ~= "table" then
-		return false,
-			"UNSUPPORTED_TYPE_" .. valueType,
-			path
-	end
-
-	if depth > options.MaxDepth then
-		return false,
-			"MAX_DEPTH_EXCEEDED",
-			path
-	end
-
-	if options.RejectMetatables
-		and getmetatable(value) ~= nil then
-
-		return false, "METATABLE_NOT_ALLOWED", path
-	end
-
-	if state.ActiveTables[value] then
-		return false, "CYCLIC_REFERENCE", path
-	end
-
+	if kind ~= "table" then return validationError(state, "UNSUPPORTED_TYPE_" .. kind) end
+	if depth > options.MaxDepth then return validationError(state, "MAX_DEPTH_EXCEEDED") end
+	if options.RejectMetatables and getmetatable(value) ~= nil then return validationError(state, "METATABLE_NOT_ALLOWED") end
+	if state.ActiveTables[value] then return validationError(state, "CYCLIC_REFERENCE") end
 	state.ActiveTables[value] = true
 
-	local keyCount = 0
-	local stringKeyCount = 0
-	local numericKeyCount = 0
-	local maximumNumericKey = 0
-
-	for key, childValue in next, value do
-		keyCount += 1
-
-		if keyCount > options.MaxKeysPerTable then
-			return false,
-				"MAX_KEYS_PER_TABLE_EXCEEDED",
-				path
-		end
-
-		local keyValid, keyKindOrError =
-			validateTableKey(key, options, state)
-
-		if not keyValid then
-			return false,
-				keyKindOrError,
-				makePath(path, key)
-		end
-
-		if keyKindOrError == "STRING" then
-			stringKeyCount += 1
+	local keys, strings, numbers, maxIndex = 0, 0, 0, 0
+	for key, child in next, value do
+		keys += 1
+		if keys > options.MaxKeysPerTable then return validationError(state, "MAX_KEYS_PER_TABLE_EXCEEDED") end
+		local validKey, keyKind = validateTableKey(key, options, state)
+		if not validKey then return validationError(state, keyKind, key) end
+		if keyKind == "STRING" then
+			strings += 1
 		else
-			numericKeyCount += 1
-			maximumNumericKey =
-				math.max(
-					maximumNumericKey,
-					key
-				)
+			numbers += 1
+			maxIndex = math.max(maxIndex, key)
 		end
-
-		local childValid,
-			childError,
-			childPath =
-			validateValue(
-				childValue,
-				options,
-				state,
-				depth + 1,
-				makePath(path, key)
-			)
-
-		if not childValid then
-			return false,
-				childError,
-				childPath
-		end
+		state.Path[depth] = key
+		local ok, code, path = validateValue(child, options, state, depth + 1)
+		if not ok then return false, code, path end
+		state.Path[depth] = nil
 	end
 
-	if options.RequireArrayOrDictionary
-		and stringKeyCount > 0
-		and numericKeyCount > 0 then
-
-		return false,
-			"MIXED_TABLE_KEYS",
-			path
+	if options.RequireArrayOrDictionary and strings > 0 and numbers > 0 then
+		return validationError(state, "MIXED_TABLE_KEYS")
 	end
-
-	if options.RequireContiguousArrays
-		and numericKeyCount > 0
-		and maximumNumericKey ~= numericKeyCount then
-
-		return false,
-			"NON_CONTIGUOUS_ARRAY",
-			path
+	if options.RequireContiguousArrays and maxIndex ~= numbers then
+		return validationError(state, "NON_CONTIGUOUS_ARRAY")
 	end
-
 	state.ActiveTables[value] = nil
-
 	return true
 end
 
--- ==========================================================================
--- VALIDACIÓN DE DATOS
--- ==========================================================================
+local function validateRoot(value, options, strict)
+	if value == nil then return false, "NIL_ROOT", "$" end
+	local policy, code = normalizeValidationOptions(options, strict)
+	if not policy then return false, code, "$" end
+	local state = {TotalNodes = 0, TotalBytes = 0, ActiveTables = {}, Path = {}}
+	return validateValue(value, policy, state, 1)
+end
 
--- Valida una estructura completa.
---
--- Retorna:
---   true
--- o:
---   false, errorCode, errorPath
 function GuardUtils.validateData(value, options)
-	if value == nil then
-		return false, "NIL_ROOT", "$"
-	end
-
-	local normalizedOptions, optionsError =
-		normalizeValidationOptions(options)
-
-	if not normalizedOptions then
-		return false, optionsError, "$"
-	end
-
-	local state = {TotalNodes = 0, TotalBytes = 0, ActiveTables = {}}
-
-
-	return validateValue(
-		value,
-		normalizedOptions,
-		state,
-		1,
-		"$"
-	)
+	return validateRoot(value, options, false)
 end
 
--- Compatibilidad simple con la API anterior.
---
--- maxKeys puede ser:
---   - number: máximo de claves por tabla;
---   - table: opciones completas para validateData.
 function GuardUtils.isValidData(value, maxKeys)
-	local options
-
-	if type(maxKeys) == "number" then
-		options = {
-			MaxKeysPerTable = maxKeys,
-		}
-	elseif type(maxKeys) == "table" then
-		options = maxKeys
-	elseif maxKeys ~= nil then
-		return false
-	end
-
-	local valid =
-		GuardUtils.validateData(
-			value,
-			options
-		)
-
-	return valid == true
+	if maxKeys == nil then return GuardUtils.validateData(value) == true end
+	if type(maxKeys) == "number" then return GuardUtils.validateData(value, {MaxKeysPerTable = maxKeys}) == true end
+	if type(maxKeys) == "table" then return GuardUtils.validateData(value, maxKeys) == true end
+	return false
 end
 
--- Validador estricto para datos con forma serializable.
---
--- Reglas adicionales:
---   - una tabla debe ser array o diccionario, no ambos;
---   - los arrays deben ser contiguos desde 1.
 function GuardUtils.isDataStoreSafe(value, options)
-	local strict, code = normalizeValidationOptions(options)
-	if not strict then return false, code, "$" end
-	strict.RejectMetatables = true
-	strict.RequireUtf8 = true
-	strict.RejectNullBytes = true
-	strict.RequireArrayOrDictionary = true
-	strict.RequireContiguousArrays = true
-	return GuardUtils.validateData(value, strict)
+	return validateRoot(value, options, true)
 end
 
 function GuardUtils.jugadorValido(player)

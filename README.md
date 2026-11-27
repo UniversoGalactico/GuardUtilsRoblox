@@ -2,7 +2,7 @@
 
 Defensive Luau utilities for server-side validation, sanitization, rate limiting, lease ownership and graph copying.
 
-**3.0.0-rc.2 — review candidate; not a production certification.** MIT. No external runtime dependencies.
+**3.0.0-rc.3 — review candidate; not a production certification.** MIT. No external runtime dependencies.
 
 ## Install
 
@@ -57,7 +57,7 @@ end
 
 ## Resource budgets and security contracts
 
-Validation defaults: 100 keys per table, 10,000 visited values, table depth 16, 10,000 characters per string, 4 MiB cumulative string bytes (including keys). Hard ceilings: 10,000 keys/table, 100,000 values, depth 64, 65,536 bytes/string, 16 MiB total string bytes. Options: MaxKeysPerTable, MaxTotalNodes, MaxDepth, MaxStringLength, MaxTotalBytes, RejectMetatables, RequireUtf8, RejectNullBytes, RequireArrayOrDictionary, RequireContiguousArrays. DataStore wrapper forces all five flags true. Numeric magnitude is limited to 2^50; string budgets do not estimate exact serialized size.
+Validation defaults: 100 keys per table, 10,000 visited values, table depth 16, 10,000 characters per string, 4 MiB cumulative string bytes (including keys). Hard ceilings: 10,000 keys/table, 100,000 values, depth 64, 65,536 bytes/string, 16 MiB total string bytes. Options: MaxKeysPerTable, MaxTotalNodes, MaxDepth, MaxStringLength, MaxTotalBytes, RejectMetatables, RequireUtf8, RejectNullBytes, RequireArrayOrDictionary, RequireContiguousArrays. DataStore wrapper forces all five flags true. Numeric magnitude is limited to 2^50; string budgets do not estimate exact serialized size. Diagnostics preview long keys (64 bytes) and render paths only when validation fails.
 
 Rate limit: fixed policy per key, exact sliding window, defaults 10 events/second. Maximum 1,000 events per window, 3,600 seconds per window, 10,000 keys and 100,000 accounted active timestamps. Expired prefixes of arrays are also bounded by compaction. Full capacity or policy mismatch fails closed. An empty idle key is collected after 120 seconds. Keys/policies/resets must be controlled by the server, never by arbitrary client input. Limits are per VM.
 
