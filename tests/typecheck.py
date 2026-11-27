@@ -14,7 +14,7 @@ local game: any = nil
 local task: any = nil
 local warn = function(...: any) end
 """
-source = (root / "GuardUtilsRoblox.lua").read_text(encoding="utf-8")
+source = (root / "GuardUtilsRoblox.lua").read_text(encoding="utf-8").removeprefix("--!strict\n")
 with tempfile.TemporaryDirectory() as directory:
     script = Path(directory) / "GuardUtilsRoblox.luau"
     script.write_text(prelude + source, encoding="utf-8")

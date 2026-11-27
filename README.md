@@ -2,7 +2,7 @@
 
 Defensive Luau utilities for server-side validation, sanitization, rate limiting, lease ownership and graph copying.
 
-**3.0.0-rc.5 — review candidate; not a production certification.** MIT. No external runtime dependencies.
+**3.0.0-rc.6 — review candidate; not a production certification.** MIT. No external runtime dependencies.
 
 ## Install
 
@@ -65,7 +65,7 @@ Mutexes are expiring leases; expiry never cancels an old coroutine. Use a stable
 
 ## Migration notes
 
-The previous README omitted required owner tokens. Always pass them to releaseMutex and renewMutex. A changed rate policy now fails closed until a trusted explicit reset. withMutex is synchronous only; use explicit leases for yielding work. Validation enforces cumulative resource limits and counts shared subtrees per path. Handle deepCopy budget errors. Direct reads/writes of old mutex table entries must migrate to ownsMutex/isMutexLocked; the caller table is now an identity only. Timeout overrides apply to individual acquisitions/renewals; registerMutexTable sets the default. Unregister refuses live leases.
+The previous README omitted required owner tokens. Always pass them to releaseMutex and renewMutex. A changed rate policy now fails closed until a trusted explicit reset. withMutex is synchronous only; use explicit leases for yielding work. Validation enforces cumulative resource limits and counts shared subtrees per path. Handle deepCopy budget errors. Multi-result APIs now return explicit trailing nil error slots on success; withMutex preserves callback return arity. Direct reads/writes of old mutex table entries must migrate to ownsMutex/isMutexLocked; the caller table is now an identity only. Timeout overrides apply to individual acquisitions/renewals; registerMutexTable sets the default. Unregister refuses live leases.
 
 ## Tests
 
