@@ -9,7 +9,10 @@ root = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser()
 parser.add_argument("--luau", default="luau")
 parser.add_argument("--source", type=Path, default=root / "GuardUtilsRoblox.lua")
-parser.add_argument("--benchmark", action="store_true")
+group = parser.add_mutually_exclusive_group()
+group.add_argument("--benchmark", action="store_true")
+group.add_argument("--stateful", action="store_true")
+parser.add_argument("--optimization", type=int, choices=(0, 1, 2), default=1)
 args = parser.parse_args()
 prefix = r'''
 local realClock = os.clock
@@ -75,9 +78,9 @@ local warn = function(...) end
 local Guard = (function()
 '''
 source = args.source.read_text(encoding="utf-8")
-suite = "benchmark.luau" if args.benchmark else "regression.luau"
+suite = "benchmark.luau" if args.benchmark else "stateful_attack.luau" if args.stateful else "regression.luau"
 tests = (root / "tests" / suite).read_text(encoding="utf-8")
 with tempfile.TemporaryDirectory() as directory:
     script = Path(directory) / "guardutils-test.luau"
     script.write_text(prefix + source + "\nend)()\n" + tests, encoding="utf-8")
-    subprocess.run([args.luau, str(script)], check=True)
+    subprocess.run([args.luau, f"-O{args.optimization}", str(script)], check=True)

@@ -1,0 +1,202 @@
+{
+  "schema": 2,
+  "expected_counts_per_run": {
+    "numeric_oracle": 16384,
+    "validate_number": 16384,
+    "sanitize_number": 23088,
+    "lease_initial": 5536,
+    "rate_initial": 5536,
+    "lease_expiry": 5536,
+    "rate_expiry": 5536,
+    "lease_renew": 5536,
+    "lease_renew_initial": 5536,
+    "validate_utf8": 6007,
+    "sanitize_utf8": 6007
+  },
+  "scope": "Finite GuardUtils differential attack with original LuauProof 3.20 grammar, input generator, rational binary64 oracle, bundled VM and Roblox service doubles; not a formal proof or Studio test.",
+  "source_sha256": "b13b033acbe4e1858a57c39571d473703517dbc9e26a7bfa90ac3f9db560aeb5",
+  "runner_sha256": "fe3af370e381c679f07ce7f6db586ac0f7f29ebf4d8bc249fd94738c74e886bc",
+  "campaign_sha256": "3e6de828180ed463e4ca15d91433276e2deb8a661b7fcef1ccd8f062d2c10409",
+  "tool_pins": {
+    "numeric_fuzz320.py": "5d4cf91db579d2097cac2d13b9a77bef0bbad54878a47ad493a5d502d6f3e4b0",
+    "binary64_320.py": "8995a1949fcc910986bcfe38a9b9c406410db3c25929c45233f1a250a6fe8253",
+    "runtime/linux/luau": "7741b96bd8fadb340965b7468dc4a2be8fe41247b8219bd8d4a7e80f16b40625",
+    "runtime/linux/luau-compile": "c39103ed7650c1459b40d218d86c19b1ba2da5136fce52b5c2725fc61a46bc91"
+  },
+  "seed": 20261127,
+  "programs": 128,
+  "inputs": 128,
+  "numeric_expression_cases": 16384,
+  "direct_sanitize_cases": 6704,
+  "timing_cases": 5536,
+  "utf8_cases": 6007,
+  "generated_harness_sha256": "0171b774a9e6ae1075fffe3c08aba44584e82d8336a4899450a3e18b5139809e",
+  "runs": [
+    {
+      "optimization": 0,
+      "codegen": false,
+      "seconds": 0.23876873699964563,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 23088,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    },
+    {
+      "optimization": 1,
+      "codegen": false,
+      "seconds": 0.33172695899975224,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 23088,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    },
+    {
+      "optimization": 2,
+      "codegen": false,
+      "seconds": 0.4169476619999841,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 16384,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 6007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 5536,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 23088,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    }
+  ],
+  "elapsed_seconds": 2.0844944840000608,
+  "checks": 303258,
+  "differences": 0,
+  "status": "FINITE_TESTS_AGREE"
+}

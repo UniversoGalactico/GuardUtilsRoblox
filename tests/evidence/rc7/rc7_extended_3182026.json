@@ -1,0 +1,256 @@
+{
+  "schema": 2,
+  "expected_counts_per_run": {
+    "numeric_oracle": 122880,
+    "validate_number": 122880,
+    "sanitize_number": 138384,
+    "lease_initial": 16740,
+    "rate_initial": 16740,
+    "lease_expiry": 16740,
+    "rate_expiry": 16740,
+    "lease_renew": 16740,
+    "lease_renew_initial": 16740,
+    "validate_utf8": 16007,
+    "sanitize_utf8": 16007
+  },
+  "scope": "Finite GuardUtils differential attack with original LuauProof 3.20 grammar, input generator, rational binary64 oracle, bundled VM and Roblox service doubles; not a formal proof or Studio test.",
+  "source_sha256": "b13b033acbe4e1858a57c39571d473703517dbc9e26a7bfa90ac3f9db560aeb5",
+  "runner_sha256": "fe3af370e381c679f07ce7f6db586ac0f7f29ebf4d8bc249fd94738c74e886bc",
+  "campaign_sha256": "3e6de828180ed463e4ca15d91433276e2deb8a661b7fcef1ccd8f062d2c10409",
+  "tool_pins": {
+    "numeric_fuzz320.py": "5d4cf91db579d2097cac2d13b9a77bef0bbad54878a47ad493a5d502d6f3e4b0",
+    "binary64_320.py": "8995a1949fcc910986bcfe38a9b9c406410db3c25929c45233f1a250a6fe8253",
+    "runtime/linux/luau": "7741b96bd8fadb340965b7468dc4a2be8fe41247b8219bd8d4a7e80f16b40625",
+    "runtime/linux/luau-compile": "c39103ed7650c1459b40d218d86c19b1ba2da5136fce52b5c2725fc61a46bc91"
+  },
+  "seed": 3182026,
+  "programs": 240,
+  "inputs": 512,
+  "numeric_expression_cases": 122880,
+  "direct_sanitize_cases": 15504,
+  "timing_cases": 16740,
+  "utf8_cases": 16007,
+  "generated_harness_sha256": "46f25ee10c19cfa7545e85254f6e051f320f28d0277d5e1052ae1554a00960d2",
+  "runs": [
+    {
+      "optimization": 0,
+      "codegen": false,
+      "seconds": 1.8084600089996457,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 138384,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    },
+    {
+      "optimization": 1,
+      "codegen": false,
+      "seconds": 2.3667637079997803,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 138384,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    },
+    {
+      "optimization": 2,
+      "codegen": false,
+      "seconds": 2.026180210000348,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 138384,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    },
+    {
+      "optimization": 2,
+      "codegen": true,
+      "seconds": 2.4290069280000353,
+      "returncode": 0,
+      "results": {
+        "numeric_oracle": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "validate_number": {
+          "checks": 122880,
+          "differences": 0
+        },
+        "lease_renew": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "rate_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_expiry": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "validate_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "sanitize_utf8": {
+          "checks": 16007,
+          "differences": 0
+        },
+        "lease_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "lease_renew_initial": {
+          "checks": 16740,
+          "differences": 0
+        },
+        "sanitize_number": {
+          "checks": 138384,
+          "differences": 0
+        }
+      },
+      "examples": [],
+      "stderr": ""
+    }
+  ],
+  "elapsed_seconds": 16.894028490999972,
+  "checks": 2066392,
+  "differences": 0,
+  "status": "FINITE_TESTS_AGREE"
+}

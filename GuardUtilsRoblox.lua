@@ -18,7 +18,7 @@
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
-local GuardUtils = { VERSION = "3.0.0-rc.6" }
+local GuardUtils = { VERSION = "3.0.0-rc.8" }
 
 local CONFIG = table.freeze({
 	MAX_KEYS_PER_TABLE = 100,
@@ -57,7 +57,7 @@ type RateEntry = {
 	WindowSeconds: number, Limit: number,
 }
 type Namespace = {[any]: any}
-type Lease = {Token: string, ExpiresAt: number}
+type Lease = {Token: string, StartedAt: number, Duration: number}
 type Registration = {
 	MutexRef: {Value: Namespace?},
 	Timeout: number,
@@ -95,7 +95,8 @@ local mutexRegistrationIdsByTable: {[any]: string?} = setmetatable(
 local running = false
 local watchdogGeneration = 0
 local watchdogThread: thread? = nil
-local startWatchdog: (() -> boolean)? = nil
+local startWatchdog: () -> boolean = function(): boolean return false end
+local lastClock = 0
 
 -- ==========================================================================
 -- HELPERS GENERALES
@@ -106,6 +107,28 @@ local function isFiniteNumber(value: any): boolean
 		and value == value
 		and value > -math.huge
 		and value < math.huge
+end
+
+-- os.clock is trusted but a faulty/regressing clock must never move expiry backwards.
+local function readClock(): number
+	local now = os.clock()
+	if isFiniteNumber(now) and now >= lastClock then lastClock = now end
+	return lastClock
+end
+
+-- Exact comparison of elapsed time for finite nonnegative binary64 timestamps.
+-- FastTwoSum: because now >= startedAt >= 0, the rounding residual of
+-- now - startedAt is (now - elapsed) - startedAt. Only equality with the
+-- interval can be ambiguous after rounding. Do not form now + duration.
+local function elapsedAtLeast(now: number, startedAt: number, interval: number): boolean
+	if now < startedAt then return false end
+	local elapsed = now - startedAt
+	if elapsed ~= interval then return elapsed > interval end
+	return (now - elapsed) - startedAt >= 0
+end
+
+local function leaseExpired(lock: Lease, now: number): boolean
+	return elapsedAtLeast(now, lock.StartedAt, lock.Duration)
 end
 
 local function isPositiveInteger(value: any): boolean
@@ -163,12 +186,29 @@ local function defaultValidationPolicy(strict: boolean): ValidationPolicy
 end
 local GENERIC_DEFAULTS = defaultValidationPolicy(false)
 local STRICT_DEFAULTS = defaultValidationPolicy(true)
+local VALIDATION_OPTION_KEYS: {[string]: boolean} = {
+	MaxKeysPerTable = true, MaxTotalNodes = true, MaxDepth = true,
+	MaxStringLength = true, MaxTotalBytes = true, RejectMetatables = true,
+	RequireUtf8 = true, RejectNullBytes = true, RequireArrayOrDictionary = true,
+	RequireContiguousArrays = true,
+}
+table.freeze(VALIDATION_OPTION_KEYS)
+
+local function hasOnlyOptions(options: {[any]: any}, allowed: {[string]: boolean}): boolean
+	-- At most the number of recognized keys plus one iteration. Never execute
+	-- caller metamethods, even for malformed option keys.
+	for key in next, options do
+		if type(key) ~= "string" or not allowed[key] then return false end
+	end
+	return true
+end
 
 local function normalizeValidationOptions(options: any, strict: boolean): (ValidationPolicy?, string?)
 	if options == nil then return (if strict then STRICT_DEFAULTS else GENERIC_DEFAULTS), nil end
 	if type(options) ~= "table" or getmetatable(options) ~= nil then
 		return nil, "INVALID_VALIDATION_OPTIONS"
 	end
+	if not hasOnlyOptions(options, VALIDATION_OPTION_KEYS) then return nil, "UNKNOWN_VALIDATION_OPTION" end
 	local function readBound(name: string, default: number, ceiling: number): number?
 		local value: any = rawget(options, name)
 		if value == nil then return default end
@@ -367,6 +407,7 @@ function GuardUtils.sanitizeString(value: any, maxLength: any?): (string?, strin
 		return nil, "INVALID_MAX_LENGTH"
 	end
 	if #value > CONFIG.HARD_MAX_STRING_BYTES then return nil, "STRING_TOO_LONG" end
+	if not utf8.len(value) then return nil, "INVALID_UTF8" end
 
 	-- Quita caracteres de control, incluido el byte nulo.
 	local cleaned =
@@ -399,6 +440,9 @@ end
 --
 -- Por seguridad, Clamp es false de forma predeterminada.
 -- Un valor fuera del rango se rechaza en vez de corregirse silenciosamente.
+local NUMBER_OPTION_KEYS: {[string]: boolean} = {Integer = true, Clamp = true}
+table.freeze(NUMBER_OPTION_KEYS)
+
 function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, options: any?): (number?, string?)
 	if not isFiniteNumber(value) then
 		return nil, "INVALID_NUMBER"
@@ -419,6 +463,7 @@ function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, opt
 
 	if options == nil then options = {} end
 	if type(options) ~= "table" or getmetatable(options) ~= nil then return nil, "INVALID_OPTIONS" end
+	if not hasOnlyOptions(options, NUMBER_OPTION_KEYS) then return nil, "UNKNOWN_NUMBER_OPTION" end
 	if (options.Integer ~= nil and type(options.Integer) ~= "boolean")
 		or (options.Clamp ~= nil and type(options.Clamp) ~= "boolean") then return nil, "INVALID_OPTIONS" end
 	local integerMode =
@@ -427,6 +472,11 @@ function GuardUtils.sanitizeNumber(value: any, minimum: any?, maximum: any?, opt
 	local clampMode =
 		options.Clamp == true
 
+	-- Reject raw out-of-range values before normalization. Flooring must not
+	-- turn an invalid input into an accepted boundary value.
+	if not clampMode and (value < minValue or value > maxValue) then
+		return nil, "OUT_OF_RANGE"
+	end
 	local sanitized = value
 
 	if integerMode then
@@ -472,7 +522,8 @@ local function getActiveRateCount(entry: RateEntry): number
 end
 local function cleanupRateEntry(entry: RateEntry, now: number, window: number)
 	local stamps, head = entry.Timestamps, entry.Head
-	while stamps[head] and now - stamps[head] >= window do head += 1 end
+	if #stamps == 0 then return end
+	while stamps[head] and elapsedAtLeast(now, stamps[head], window) do head += 1 end
 	rateLimitTimestampCount -= head - entry.Head
 	entry.Head = head
 	if head > #stamps then
@@ -492,8 +543,14 @@ local function removeRateEntry(key: string)
 	end
 end
 
-local function ensureStarted()
-	if not running and startWatchdog then startWatchdog() end
+local function watchdogHealthy(): boolean
+	local handle = watchdogThread
+	return running and handle ~= nil and coroutine.status(handle) ~= "dead"
+end
+
+local function ensureStarted(): boolean
+	if watchdogHealthy() then return true end
+	return startWatchdog()
 end
 
 -- Retorna:
@@ -506,8 +563,8 @@ function GuardUtils.isRateLimited(key: any, limit: any?, window: any?): (boolean
 	if limit == nil then limit = CONFIG.MAX_REQUESTS_PER_WINDOW end
 	if window == nil then window = CONFIG.DEFAULT_RATE_LIMIT_WINDOW end
 	if not validateRateLimitConfig(limit, window) then return true, "INVALID_RATE_LIMIT_CONFIG" end
-	ensureStarted()
-	local now = os.clock()
+	if not ensureStarted() then return true, "WATCHDOG_UNAVAILABLE" end
+	local now = readClock()
 	local entry = rateLimitEntries[key]
 	if entry then
 		if entry.WindowSeconds ~= window or entry.Limit ~= limit then return true, "RATE_LIMIT_POLICY_MISMATCH" end
@@ -572,7 +629,7 @@ end
 
 local function pruneExpired(registration: Registration, now: number)
 	for key, lock in pairs(registration.Locks) do
-		if lock and now >= lock.ExpiresAt then dropLock(registration, key) end
+		if lock and leaseExpired(lock, now) then dropLock(registration, key) end
 	end
 end
 
@@ -590,10 +647,10 @@ function GuardUtils.registerMutexTable(namespace: any, timeout: any?): (string?,
 	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
 	if timeout == nil then timeout = CONFIG.DEFAULT_MUTEX_TIMEOUT end
 	if not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
+	if not ensureStarted() then return nil, "WATCHDOG_UNAVAILABLE" end
 	local registration, id = getRegistration(namespace)
 	if registration then
 		registration.Timeout = timeout
-		ensureStarted()
 		return id, nil
 	end
 	if mutexRegistrationCount >= CONFIG.MAX_MUTEX_REGISTRATIONS then
@@ -613,7 +670,6 @@ function GuardUtils.registerMutexTable(namespace: any, timeout: any?): (string?,
 	}
 	mutexRegistrationIdsByTable[namespace] = newId
 	mutexRegistrationCount += 1
-	ensureStarted()
 	return newId, nil
 end
 
@@ -629,7 +685,7 @@ function GuardUtils.unregisterMutexTable(identifier: any): (boolean, string?)
 	if id == nil then return false, "NOT_REGISTERED" end
 	local registration = mutexRegistrations[id]
 	if not registration then return false, "NOT_REGISTERED" end
-	pruneExpired(registration, os.clock())
+	pruneExpired(registration, readClock())
 	if registration.Count > 0 then return false, "ACTIVE_LEASES" end
 	dropRegistration(id, registration)
 	return true, nil
@@ -640,19 +696,21 @@ function GuardUtils.acquireMutex(namespace: any, key: any, timeout: any?): (stri
 	if not validateMutexTable(namespace) then return nil, "INVALID_MUTEX_TABLE" end
 	if not isValidMutexKey(key) then return nil, "INVALID_KEY" end
 	if timeout ~= nil and not validateMutexTimeout(timeout) then return nil, "INVALID_TIMEOUT" end
-	ensureStarted()
+	if not ensureStarted() then return nil, "WATCHDOG_UNAVAILABLE" end
 	local registration = getRegistration(namespace)
 	if not registration then
+		-- Failed acquisitions must not consume namespace slots.
+		if mutexRecordCount >= CONFIG.MAX_MUTEX_RECORDS then return nil, "MUTEX_RECORD_CAPACITY_REACHED" end
 		local id, err = GuardUtils.registerMutexTable(namespace)
 		if not id then return nil, err end
 		registration = mutexRegistrations[id]
 	end
 	if not registration then return nil, "REGISTRATION_LOST" end
 	local duration = timeout or registration.Timeout
-	local now = os.clock()
+	local now = readClock()
 	local old = registration.Locks[key]
 	if old then
-		if now < old.ExpiresAt then return nil, "LOCKED" end
+		if not leaseExpired(old, now) then return nil, "LOCKED" end
 		dropLock(registration, key)
 	end
 	if registration.Count >= CONFIG.MAX_MUTEX_KEYS_PER_REGISTRATION then
@@ -663,10 +721,9 @@ function GuardUtils.acquireMutex(namespace: any, key: any, timeout: any?): (stri
 	end
 	if mutexRecordCount >= CONFIG.MAX_MUTEX_RECORDS then return nil, "MUTEX_RECORD_CAPACITY_REACHED" end
 	local token: string = HttpService:GenerateGUID(false)
-	registration.Locks[key] = {Token = token, ExpiresAt = now + duration}
+	registration.Locks[key] = {Token = token, StartedAt = now, Duration = duration}
 	registration.Count += 1
 	mutexRecordCount += 1
-	ensureStarted()
 	return token, nil
 end
 
@@ -685,7 +742,7 @@ end
 function GuardUtils.releaseMutex(namespace: any, key: any, token: any): (boolean, string?)
 	local registration, lock, err = getOwnedLock(namespace, key, token)
 	if not registration or not lock then return false, err end
-	local expired = os.clock() >= lock.ExpiresAt
+	local expired = leaseExpired(lock, readClock())
 	dropLock(registration, key)
 	if expired then return false, "LOCK_EXPIRED" end
 	return true, nil
@@ -695,25 +752,26 @@ function GuardUtils.renewMutex(namespace: any, key: any, token: any, timeout: an
 	if timeout ~= nil and not validateMutexTimeout(timeout) then return false, "INVALID_TIMEOUT" end
 	local registration, lock, err = getOwnedLock(namespace, key, token)
 	if not registration or not lock then return false, err end
-	local now = os.clock()
-	if now >= lock.ExpiresAt then
+	local now = readClock()
+	if leaseExpired(lock, now) then
 		dropLock(registration, key)
 		return false, "LOCK_EXPIRED"
 	end
-	lock.ExpiresAt = now + (timeout or registration.Timeout)
+	lock.StartedAt = now
+	lock.Duration = timeout or registration.Timeout
 	return true, nil
 end
 
 function GuardUtils.ownsMutex(namespace: any, key: any, token: any): boolean
 	local _, lock = getOwnedLock(namespace, key, token)
-	return lock ~= nil and os.clock() < lock.ExpiresAt
+	return lock ~= nil and not leaseExpired(lock, readClock())
 end
 
 function GuardUtils.isMutexLocked(namespace: any, key: any): boolean
 	if not validateMutexTable(namespace) or not isValidMutexKey(key) then return false end
 	local registration = getRegistration(namespace)
 	local lock = if registration then registration.Locks[key] else nil
-	return lock ~= nil and os.clock() < lock.ExpiresAt
+	return lock ~= nil and not leaseExpired(lock, readClock())
 end
 
 -- Synchronous only. Existing side effects cannot be undone when a callback fails.
@@ -724,7 +782,12 @@ function GuardUtils.withMutex(namespace: any, key: any, callback: any, timeout: 
 	local thread = coroutine.create(callback)
 	local result = table.pack(coroutine.resume(thread, token)) :: { [number]: any, n: number }
 	local suspended = coroutine.status(thread) == "suspended"
-	if suspended then pcall(coroutine.close, thread) end
+	if suspended then
+		-- task.wait may have registered this coroutine with Roblox's scheduler.
+		-- Cancel the scheduled resume first, then close any still-suspended thread.
+		pcall(task.cancel, thread)
+		if coroutine.status(thread) == "suspended" then pcall(coroutine.close, thread) end
+	end
 	local released, releaseError = GuardUtils.releaseMutex(namespace, key, token)
 	if not result[1] then return false, "CALLBACK_ERROR", result[2] end
 	if suspended then return false, "CALLBACK_YIELDED" end
@@ -740,7 +803,7 @@ local function cleanupRateLimits(now: number)
 	for key, entry in pairs(rateLimitEntries) do
 		if not entry then continue end
 		cleanupRateEntry(entry, now, entry.WindowSeconds)
-		if getActiveRateCount(entry) <= 0 and now - entry.LastSeen >= CONFIG.RATE_LIMIT_KEY_TTL then
+		if getActiveRateCount(entry) <= 0 and elapsedAtLeast(now, entry.LastSeen, CONFIG.RATE_LIMIT_KEY_TTL) then
 			removeRateEntry(key)
 		end
 	end
@@ -757,7 +820,7 @@ end
 
 -- Puede llamarse manualmente en pruebas.
 function GuardUtils.runMaintenance()
-	local now = os.clock()
+	local now = readClock()
 	local allSucceeded, rateError = xpcall(function() cleanupRateLimits(now); return "" end, function(err: any): string return debug.traceback(tostring(err)) end)
 	if not allSucceeded then warn("[GuardUtils] Rate maintenance:", rateError) end
 	for registrationId, registration in pairs(mutexRegistrations) do
@@ -775,7 +838,8 @@ function GuardUtils.runMaintenance()
 end
 
 function GuardUtils.Start(): boolean
-	if running then return true end
+	if watchdogHealthy() then return true end
+	watchdogThread = nil
 	running = true
 	watchdogGeneration += 1
 	local generation = watchdogGeneration
@@ -786,9 +850,10 @@ function GuardUtils.Start(): boolean
 			GuardUtils.runMaintenance()
 		end
 	end)
-	if not ok then
+	if not ok or type(handle) ~= "thread" or coroutine.status(handle) == "dead" then
 		running = false
-		warn("[GuardUtils] Watchdog start failed:", handle)
+		watchdogGeneration += 1
+		warn("[GuardUtils] Watchdog start failed")
 		return false
 	end
 	watchdogThread = handle
@@ -818,6 +883,7 @@ function GuardUtils.Stop(clearState: any?): (boolean, string?)
 	table.clear(mutexRegistrationIdsByTable)
 	mutexRegistrationCount = 0
 	mutexRecordCount = 0
+	lastClock = 0
 	return true, nil
 end
 
@@ -826,16 +892,16 @@ GuardUtils.Destroy =
 
 function GuardUtils.GetStats()
 	local active = 0
-	local now = os.clock()
+	local now = readClock()
 	for _, registration in pairs(mutexRegistrations) do
 		if registration and registration.MutexRef.Value ~= nil then
 			for _, lock in pairs(registration.Locks) do
-				if lock and now < lock.ExpiresAt then active += 1 end
+				if lock and not leaseExpired(lock, now) then active += 1 end
 			end
 		end
 	end
 	return {
-		Running = running,
+		Running = watchdogHealthy(),
 		RateLimitKeys = rateLimitKeyCount,
 		RateLimitTimestamps = rateLimitTimestampCount,
 		MutexRegistrations = mutexRegistrationCount,
@@ -892,4 +958,4 @@ function GuardUtils.generarId(prefijo: any?): string
 	return prefix .. "_" .. HttpService:GenerateGUID(false)
 end
 
-return GuardUtils
+return table.freeze(GuardUtils)
